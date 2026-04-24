@@ -1551,14 +1551,22 @@ html, body, #root {
   height: 140px;
   border-radius: 50%;
   border: 2px solid rgba(35, 139, 230, 0.45);
+  background: none;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 16px;
   position: relative;
+  cursor: pointer;
   box-shadow: 0 0 40px rgba(35, 139, 230, 0.12), inset 0 0 30px rgba(35, 139, 230, 0.06);
   animation: koda-empty-orb-pulse 4s ease-in-out infinite;
+  transition: box-shadow 0.2s, border-color 0.2s;
 }
+.koda-empty-orb:hover:not(:disabled) {
+  border-color: rgba(35, 139, 230, 0.75);
+  box-shadow: 0 0 70px rgba(35, 139, 230, 0.35), inset 0 0 50px rgba(35, 139, 230, 0.15);
+}
+.koda-empty-orb:disabled { cursor: not-allowed; opacity: 0.4; }
 .koda-empty-orb::before {
   content: '';
   position: absolute;

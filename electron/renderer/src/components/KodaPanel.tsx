@@ -408,7 +408,7 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
 
   const { running, planning, confirming, plan, steps, summary, error } = kodaState;
 
-  const { voicePhase, liveText, audioLevel, voiceError, deactivateVoice } =
+  const { voicePhase, liveText, audioLevel, voiceError, activateVoice, deactivateVoice } =
     useVoiceFlow({
       isConfirming: confirming,
       isRunning:    running,
@@ -530,9 +530,14 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
         {/* Empty state (no voice) */}
         {!voiceActive && !running && !plan && !summary && !error && (
           <div className="koda-empty">
-            <div className="koda-empty-orb">
+            <button
+              className="koda-empty-orb"
+              onClick={activateVoice}
+              disabled={!projectRoot}
+              title="Ativar modo voz"
+            >
               <span className="koda-empty-orb-icon">⚡</span>
-            </div>
+            </button>
             <div className="koda-empty-title">Agente CEO</div>
             <div className="koda-empty-sub">
               Descreva uma tarefa e o KODA irá planejar e executá-la usando os agentes de Código, Revisão e Git.
