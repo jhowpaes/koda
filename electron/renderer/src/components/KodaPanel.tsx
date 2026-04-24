@@ -55,13 +55,14 @@ export const EMPTY_KODA_STATE: KodaState = {
 // ─── Voice phase ───────────────────────────────────────────────────────────────
 //
 // off          → voice mode inactive
+// wake_word    → SpeechRecognition watching for "KODA" (no audio capture)
 // listening    → recording microphone (task or confirmation)
 // transcribing → sending audio to Whisper STT
 // waiting_plan → task submitted, parent is generating plan
 // confirming   → plan ready, about to record confirmation
 // executing    → plan confirmed, running
 
-type VoicePhase = 'off' | 'listening' | 'transcribing' | 'waiting_plan' | 'confirming' | 'executing';
+type VoicePhase = 'off' | 'wake_word' | 'listening' | 'transcribing' | 'waiting_plan' | 'confirming' | 'executing';
 
 // ─── Props ─────────────────────────────────────────────────────────────────────
 
@@ -135,6 +136,7 @@ function useVoiceFlow(deps: {
   const phaseRef    = useRef<VoicePhase>('off');
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const wakeRef     = useRef<any>(null);
   const rafRef      = useRef(0);
   const depsRef     = useRef(deps);
   depsRef.current = deps;
@@ -152,6 +154,10 @@ function useVoiceFlow(deps: {
   const stopAudio = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
     setAudioLevel(0);
+    if (wakeRef.current) {
+      try { wakeRef.current.stop(); } catch {}
+      wakeRef.current = null;
+    }
     if (recorderRef.current) {
       try { recorderRef.current.stop(); } catch {}
       recorderRef.current = null;
@@ -281,6 +287,51 @@ function useVoiceFlow(deps: {
     }
   }, [getPhase, recordUntilSilence, setPhase, listenForTask]);
 
+  // ── Wake word ("KODA") via SpeechRecognition — zero audio capture ──────────
+
+  const listenForWakeWord = useCallback(() => {
+    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      setPhase('listening');
+      listenForTask();
+      return;
+    }
+
+    const rec = new SR();
+    wakeRef.current = rec;
+    rec.lang = 'pt-BR';
+    rec.continuous = true;
+    rec.interimResults = true;
+
+    rec.onresult = (e: any) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = (e.results[i][0].transcript as string).toLowerCase().trim();
+        if (/^(koda|coda)\b/.test(t)) {
+          try { rec.stop(); } catch {}
+          wakeRef.current = null;
+          if (getPhase() === 'wake_word') {
+            setPhase('listening');
+            listenForTask();
+          }
+          return;
+        }
+      }
+    };
+
+    rec.onend = () => {
+      if (getPhase() === 'wake_word') {
+        try { rec.start(); } catch {}
+      }
+    };
+
+    rec.onerror = (e: any) => {
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      setVoiceError(`Erro no reconhecimento: ${e.error}`);
+    };
+
+    try { rec.start(); } catch {}
+  }, [getPhase, setPhase, listenForTask]);
+
   // ── React: plan ready → start confirmation ─────────────────────────────────
 
   const prevConfirmingRef = useRef(false);
@@ -363,10 +414,9 @@ function useVoiceFlow(deps: {
     }
     setVoiceError(null);
     setLiveText('');
-    setPhase('listening');
-    await playTTS('Olá! O que você quer fazer?');
-    if (getPhase() === 'listening') listenForTask();
-  }, [getPhase, setPhase, listenForTask]);
+    setPhase('wake_word');
+    listenForWakeWord();
+  }, [setPhase, listenForWakeWord]);
 
   const deactivateVoice = useCallback(() => {
     stopAudio();
@@ -383,6 +433,7 @@ function useVoiceFlow(deps: {
 // ─── Voice label/color maps ────────────────────────────────────────────────────
 
 const VOICE_LABEL: Partial<Record<VoicePhase, string>> = {
+  wake_word:    'Aguardando "KODA"...',
   listening:    'Ouvindo...',
   transcribing: 'Transcrevendo...',
   waiting_plan: 'Gerando plano...',
@@ -390,6 +441,7 @@ const VOICE_LABEL: Partial<Record<VoicePhase, string>> = {
   executing:    'Executando...',
 };
 const VOICE_COLOR: Partial<Record<VoicePhase, string>> = {
+  wake_word:    'var(--text-dim)',
   listening:    'var(--green)',
   transcribing: 'var(--yellow)',
   waiting_plan: 'var(--yellow)',
@@ -508,6 +560,14 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
 
       {/* ── Body ── */}
       <div className="koda-body" ref={bodyRef}>
+
+        {/* Voice: wake word */}
+        {voicePhase === 'wake_word' && (
+          <div className="koda-voice-listening">
+            <div className="koda-orb koda-orb--wake" />
+            <div className="koda-voice-listening-label">Diga <strong>KODA</strong> para começar</div>
+          </div>
+        )}
 
         {/* Voice: listening */}
         {voicePhase === 'listening' && !planning && !plan && !summary && (
