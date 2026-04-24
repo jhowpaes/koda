@@ -1,4 +1,4 @@
-import React, { useState, memo } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -292,7 +292,28 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = 'providers' | 'agents';
+// ── KODA config types (mirrors src/app/config.ts) ────────────────────────────
+
+interface KodaConfig {
+  tts: {
+    enabled: boolean;
+    apiKey: string;
+    voice: string;
+    model: string;
+    speed: number;
+  };
+  stt: {
+    enabled: boolean;
+    apiKey: string;
+  };
+}
+
+const DEFAULT_KODA_CONFIG: KodaConfig = {
+  tts: { enabled: false, apiKey: '', voice: 'nova', model: 'tts-1', speed: 1.0 },
+  stt: { enabled: false, apiKey: '' },
+};
+
+type Tab = 'providers' | 'agents' | 'koda';
 
 export default memo(function SettingsModal({ onClose }: Props) {
   const [tab, setTab] = useState<Tab>('providers');
@@ -300,6 +321,30 @@ export default memo(function SettingsModal({ onClose }: Props) {
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
   const [agentDraft, setAgentDraft] = useState<Partial<AgentConfig>>({});
   const [generating, setGenerating] = useState(false);
+
+  // ── KODA config (stored in ~/.koda/config.json via IPC) ───────────────────
+  const [kodaConfig, setKodaConfig] = useState<KodaConfig>(DEFAULT_KODA_CONFIG);
+  const [kodaSaving, setKodaSaving] = useState(false);
+
+  useEffect(() => {
+    (window.api as any).koda.getConfig().then((cfg: KodaConfig | null) => {
+      if (cfg) setKodaConfig({ ...DEFAULT_KODA_CONFIG, ...cfg, tts: { ...DEFAULT_KODA_CONFIG.tts, ...(cfg.tts ?? {}) }, stt: { ...DEFAULT_KODA_CONFIG.stt, ...(cfg.stt ?? {}) } });
+    }).catch(() => {});
+  }, []);
+
+  async function saveKodaConfig(next: KodaConfig) {
+    setKodaConfig(next);
+    setKodaSaving(true);
+    await (window.api as any).koda.saveConfig(next).catch(() => {});
+    setKodaSaving(false);
+  }
+
+  function patchTTS(patch: Partial<KodaConfig['tts']>) {
+    saveKodaConfig({ ...kodaConfig, tts: { ...kodaConfig.tts, ...patch } });
+  }
+  function patchSTT(patch: Partial<KodaConfig['stt']>) {
+    saveKodaConfig({ ...kodaConfig, stt: { ...kodaConfig.stt, ...patch } });
+  }
 
   function save(s: AppSettings) {
     setSettings(s);
@@ -432,6 +477,12 @@ Return ONLY the system prompt text, nothing else.`;
             onClick={() => setTab('agents')}
           >
             Agents
+          </button>
+          <button
+            className={`settings-tab ${tab === 'koda' ? 'active' : ''}`}
+            onClick={() => setTab('koda')}
+          >
+            ⚡ KODA
           </button>
         </div>
 
@@ -598,6 +649,111 @@ Return ONLY the system prompt text, nothing else.`;
                   ))}
                   <button className="settings-add-btn" onClick={startCreate}>+ New Agent</button>
                 </>
+              )}
+            </div>
+          )}
+          {tab === 'koda' && (
+            <div className="settings-section">
+              <div className="koda-settings-note">
+                Saved to <code>~/.koda/config.json</code> — shared with the CLI.
+              </div>
+
+              {/* TTS */}
+              <div className="provider-card">
+                <div className="provider-header">
+                  <span className="settings-section-title">🔊 Text-to-Speech (TTS)</span>
+                  <label className="toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={kodaConfig.tts.enabled}
+                      onChange={e => patchTTS({ enabled: e.target.checked })}
+                    />
+                    Enabled
+                  </label>
+                </div>
+
+                <div className="settings-field">
+                  <label className="settings-label">OpenAI API Key</label>
+                  <input
+                    className="settings-input"
+                    type="password"
+                    placeholder="sk-…"
+                    value={kodaConfig.tts.apiKey}
+                    onChange={e => patchTTS({ apiKey: e.target.value })}
+                  />
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-field" style={{ flex: 1 }}>
+                    <label className="settings-label">Voice</label>
+                    <select
+                      className="settings-input settings-select"
+                      value={kodaConfig.tts.voice}
+                      onChange={e => patchTTS({ voice: e.target.value })}
+                    >
+                      {['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].map(v => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="settings-field" style={{ flex: 1 }}>
+                    <label className="settings-label">Model</label>
+                    <select
+                      className="settings-input settings-select"
+                      value={kodaConfig.tts.model}
+                      onChange={e => patchTTS({ model: e.target.value })}
+                    >
+                      <option value="tts-1">tts-1 (faster)</option>
+                      <option value="tts-1-hd">tts-1-hd (higher quality)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="settings-field">
+                  <label className="settings-label">
+                    Speed <span className="settings-label-value">{kodaConfig.tts.speed.toFixed(1)}×</span>
+                  </label>
+                  <input
+                    type="range"
+                    min="0.25" max="4.0" step="0.25"
+                    value={kodaConfig.tts.speed}
+                    onChange={e => patchTTS({ speed: parseFloat(e.target.value) })}
+                    className="settings-range"
+                  />
+                </div>
+              </div>
+
+              {/* STT */}
+              <div className="provider-card">
+                <div className="provider-header">
+                  <span className="settings-section-title">🎤 Speech-to-Text (STT)</span>
+                  <label className="toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={kodaConfig.stt.enabled}
+                      onChange={e => patchSTT({ enabled: e.target.checked })}
+                    />
+                    Enabled
+                  </label>
+                </div>
+
+                <div className="settings-field">
+                  <label className="settings-label">OpenAI API Key</label>
+                  <input
+                    className="settings-input"
+                    type="password"
+                    placeholder="sk-… (can be the same as TTS)"
+                    value={kodaConfig.stt.apiKey}
+                    onChange={e => patchSTT({ apiKey: e.target.value })}
+                  />
+                  <span className="settings-hint">Uses Whisper-1 model for transcription</span>
+                </div>
+              </div>
+
+              {kodaSaving && (
+                <div className="settings-hint" style={{ textAlign: 'center', marginTop: 4 }}>
+                  Saving…
+                </div>
               )}
             </div>
           )}

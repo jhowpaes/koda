@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, systemPreferences } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { execSync, spawn, ChildProcess } from 'child_process';
@@ -70,6 +70,18 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (runningShell) runningShell.kill();
   if (process.platform !== 'darwin') app.quit();
+});
+
+// ─── IPC: permissions ────────────────────────────────────────────────────────
+
+ipcMain.handle('permissions:microphone', async () => {
+  if (process.platform !== 'darwin') return { granted: true };
+  try {
+    const granted = await systemPreferences.askForMediaAccess('microphone');
+    return { granted };
+  } catch {
+    return { granted: false };
+  }
 });
 
 // ─── IPC: project ─────────────────────────────────────────────────────────────
@@ -690,6 +702,215 @@ ipcMain.on('agent:chat:agentic', async (event, {
   if (!ctrl.signal.aborted) {
     sender.send('agent:done', chatId);
   }
+});
+
+// ─── IPC: KODA CEO ───────────────────────────────────────────────────────────
+
+const kodaControllers = new Map<string, AbortController>();
+
+ipcMain.handle('koda:spokenSummary', async (_, {
+  task, steps, kodaWorkspace,
+}: { task: string; steps: Array<{ step: { description: string }; result?: string; error?: string }>; kodaWorkspace?: any }) => {
+  try {
+    const { createProvider } = await import('../src/llm/provider.js');
+    const { config } = await import('../src/config.js');
+
+    let provider;
+    if (kodaWorkspace) {
+      provider = createProvider({
+        apiKey:    kodaWorkspace.ceo.apiKey,
+        baseURL:   kodaWorkspace.ceo.baseURL ?? config.baseURL,
+        model:     kodaWorkspace.ceo.model,
+        maxTokens: 400,
+      });
+    } else {
+      if (!config.apiKey) return null;
+      provider = createProvider({ ...config, maxTokens: 400 });
+    }
+
+    const stepsText = steps.map((s, i) => {
+      const detail = (s.result || s.error || '').slice(0, 400).trim();
+      const status  = s.error ? '✕ FALHOU' : '✓ OK';
+      return `${i + 1}. ${status} — ${s.step.description}${detail ? `\n   Detalhe: ${detail}` : ''}`;
+    }).join('\n');
+
+    const system = 'Você é KODA, assistente de desenvolvimento de software. Gere resumos falados em português do Brasil, conversacionais e informativos.';
+    const user   = `O usuário pediu: "${task}"
+
+Passos executados pelo agente:
+${stepsText}
+
+Gere um resumo falado em português do Brasil para ser lido em voz alta (4-6 frases). O resumo deve:
+- Dizer se a tarefa foi concluída com sucesso ou não
+- Explicar brevemente o que foi feito e como
+- Citar problemas encontrados, se houver, e como foram (ou não) resolvidos
+- Ser natural e direto, como se você estivesse conversando com o usuário
+
+Responda APENAS com o texto do resumo, sem formatação.`;
+
+    const res = await provider.complete({
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user',   content: user },
+      ],
+    });
+
+    return res.content?.trim() || null;
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('koda:getConfig', async () => {
+  const { loadAppConfig } = await import('../src/app/config.js');
+  return loadAppConfig();
+});
+
+ipcMain.handle('koda:saveConfig', async (_, config: unknown) => {
+  const { saveAppConfig } = await import('../src/app/config.js');
+  saveAppConfig(config as any);
+  return { ok: true };
+});
+
+ipcMain.handle('koda:plan', async (_, {
+  projectRoot, task, kodaWorkspace,
+}: { projectRoot: string; task: string; kodaWorkspace?: any }) => {
+  try {
+    const { generatePlan } = await import('../src/ceo/planner.js');
+    const { createProvider } = await import('../src/llm/provider.js');
+    const { config } = await import('../src/config.js');
+
+    let provider;
+    if (kodaWorkspace) {
+      provider = createProvider({
+        apiKey:    kodaWorkspace.ceo.apiKey,
+        baseURL:   kodaWorkspace.ceo.baseURL ?? config.baseURL,
+        model:     kodaWorkspace.ceo.model,
+        maxTokens: kodaWorkspace.ceo.maxTokens ?? config.maxTokens,
+      });
+    } else {
+      if (!config.apiKey) return { error: 'API key not configured. Run `ai setup` first.' };
+      provider = createProvider(config);
+    }
+
+    const plan = await generatePlan(provider, task, projectRoot);
+    if (!plan || plan.steps.length === 0) return { error: 'Could not generate a plan. Try rephrasing the task.' };
+    return { plan };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+});
+
+ipcMain.on('koda:run', async (event, {
+  workspaceId, projectRoot, task, kodaWorkspace, plan,
+}: { workspaceId: string; projectRoot: string; task: string; kodaWorkspace?: any; plan?: any }) => {
+  const sender = event.sender;
+  kodaControllers.get(workspaceId)?.abort();
+  const ctrl = new AbortController();
+  kodaControllers.set(workspaceId, ctrl);
+
+  try {
+    const { createProvider } = await import('../src/llm/provider.js');
+    const { CeoAgent } = await import('../src/ceo/agent.js');
+    const { config } = await import('../src/config.js');
+
+    // Resolve agent binaries — built by tsup into dist/agents/ relative to project root
+    const agentsDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'dist', 'agents')
+      : path.join(process.cwd(), 'dist', 'agents');
+
+    let provider;
+    if (kodaWorkspace) {
+      provider = createProvider({
+        apiKey:    kodaWorkspace.ceo.apiKey,
+        baseURL:   kodaWorkspace.ceo.baseURL ?? config.baseURL,
+        model:     kodaWorkspace.ceo.model,
+        maxTokens: kodaWorkspace.ceo.maxTokens ?? config.maxTokens,
+      });
+    } else {
+      if (!config.apiKey) {
+        sender.send('koda:done', { workspaceId, error: 'API key not configured. Run `ai setup` first.' });
+        kodaControllers.delete(workspaceId);
+        return;
+      }
+      provider = createProvider(config);
+    }
+
+    const ceo = new CeoAgent(provider, kodaWorkspace ?? undefined, agentsDir);
+
+    await ceo.run(task, {
+      projectRoot,
+      plan: plan ?? undefined,
+      onProgress: (ev) => {
+        if (!ctrl.signal.aborted) sender.send('koda:progress', { workspaceId, event: ev });
+      },
+    });
+
+    await ceo.close();
+  } catch (e: any) {
+    if (e?.name !== 'AbortError' && e?.code !== 'ERR_CANCELED') {
+      sender.send('koda:progress', {
+        workspaceId,
+        event: { type: 'done', summary: `Error: ${(e as Error).message}` },
+      });
+    }
+  }
+
+  if (!ctrl.signal.aborted) sender.send('koda:done', { workspaceId });
+  kodaControllers.delete(workspaceId);
+});
+
+ipcMain.handle('koda:stop', (_, workspaceId: string) => {
+  kodaControllers.get(workspaceId)?.abort();
+  kodaControllers.delete(workspaceId);
+  return { ok: true };
+});
+
+ipcMain.handle('koda:tts', async (_, {
+  text, config: ttsCfg,
+}: { text: string; config: { apiKey: string; voice: string; model: string; speed: number } }) => {
+  try {
+    const { default: OpenAI } = await import('openai');
+    const client = new OpenAI({ apiKey: ttsCfg.apiKey });
+    const response = await client.audio.speech.create({
+      model: ttsCfg.model as any,
+      voice: ttsCfg.voice as any,
+      input: text,
+      speed: ttsCfg.speed ?? 1.0,
+    });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return { data: buffer.toString('base64') };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+});
+
+ipcMain.handle('koda:stt', async (_, { audioData }: { audioData: string }) => {
+  try {
+    const { loadAppConfig } = await import('../src/app/config.js');
+    const cfg = loadAppConfig();
+    if (!cfg.stt.apiKey) return { error: 'STT API key not configured in KODA settings.' };
+    const { default: OpenAI } = await import('openai');
+    const client = new OpenAI({ apiKey: cfg.stt.apiKey });
+    const buffer = Buffer.from(audioData, 'base64');
+    const file = new File([buffer], 'audio.webm', { type: 'audio/webm' });
+    const transcription = await client.audio.transcriptions.create({ model: 'whisper-1', file });
+    return { text: transcription.text };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+});
+
+ipcMain.handle('koda:listWorkspaces', async () => {
+  try {
+    const { listWorkspaces, loadWorkspace, getActive } = await import('../src/workspace/store.js');
+    const active = getActive();
+    return listWorkspaces().map(name => ({
+      name,
+      workspace: loadWorkspace(name),
+      isActive: name === active,
+    }));
+  } catch { return []; }
 });
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import WorkspaceRail from './components/WorkspaceRail';
 import ChatsPanel from './components/ChatsPanel';
 import RightPanel from './components/RightPanel';
 import DiffModal from './components/DiffModal';
 import SettingsModal, { loadSettings } from './components/SettingsModal';
+import KodaPanel, { type KodaState, type KodaProgressEvent, EMPTY_KODA_STATE } from './components/KodaPanel';
 
 export interface ContentBlock {
   type: 'thinking' | 'tool_use' | 'text';
@@ -62,11 +63,25 @@ export interface Workspace {
   chats: ChatSession[];
   selectedFilePath: string | null;
   openTabs: string[];
+  mode: 'chat' | 'koda';
 }
 
 declare global {
   interface Window {
     api: {
+      koda: {
+        plan: (projectRoot: string, task: string, ws?: unknown) => Promise<{ plan?: unknown; error?: string }>;
+        run: (workspaceId: string, projectRoot: string, task: string, plan?: unknown, ws?: unknown) => void;
+        stop: (workspaceId: string) => Promise<void>;
+        onProgress: (cb: (data: { workspaceId: string; event: unknown }) => void) => void;
+        onDone: (cb: (data: { workspaceId: string; error?: string }) => void) => void;
+        off: () => void;
+        tts: (text: string, cfg: unknown) => Promise<{ data?: string; error?: string }>;
+        stt: (audioData: string) => Promise<{ text?: string; error?: string }>;
+        getConfig: () => Promise<unknown>;
+        saveConfig: (cfg: unknown) => Promise<{ ok?: boolean }>;
+        listWorkspaces: () => Promise<unknown[]>;
+      };
       openProject: () => Promise<string | null>;
       getFileTree: (dir: string) => Promise<FileNode[]>;
       readFile: (path: string) => Promise<string | null>;
@@ -128,7 +143,7 @@ function newChat(): ChatSession {
 
 function newWorkspace(name: string): Workspace {
   const chat = newChat();
-  return { id: uid(), name, projectRoot: null, files: [], chats: [chat], selectedFilePath: null, openTabs: [] };
+  return { id: uid(), name, projectRoot: null, files: [], chats: [chat], selectedFilePath: null, openTabs: [], mode: 'chat' };
 }
 
 // ── persistence ────────────────────────────────────────────────────────────────
@@ -164,6 +179,7 @@ function loadWorkspaces(): { workspaces: Workspace[]; activeId: string } | null 
       files: [],
       openTabs: ws.openTabs ?? [],
       selectedFilePath: ws.selectedFilePath ?? null,
+      mode: ws.mode ?? 'chat' as const,
       // Project workspaces start with empty chats — loaded async from .codeai/chats.json
       chats: ws.projectRoot ? [] : sanitizeChats(ws.chats ?? []),
     }));
@@ -188,6 +204,7 @@ export default function App() {
   const [chatsPanelWidth, setChatsPanelWidth] = useState(() =>
     parseInt(localStorage.getItem('chatsPanelWidth') ?? '320')
   );
+  const [kodaStates, setKodaStates] = useState<Record<string, KodaState>>({});
 
   const streamingChatIdsRef = useRef<Set<string>>(new Set());
   const activeWorkspaceIdRef = useRef<string>(activeWorkspaceId);
@@ -400,8 +417,134 @@ export default function App() {
     return () => window.api.offStreaming();
   }, []);
 
+  // ── KODA CEO events ────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    window.api.koda.onProgress(({ workspaceId, event }) => {
+      const ev = event as KodaProgressEvent;
+      setKodaStates(prev => {
+        const cur = prev[workspaceId] ?? { ...EMPTY_KODA_STATE };
+        if (ev.type === 'plan') {
+          return {
+            ...prev,
+            [workspaceId]: {
+              ...cur,
+              planning: false,
+              plan: ev.plan,
+              steps: ev.plan.steps.map(step => ({ step, status: 'pending' as const })),
+            },
+          };
+        }
+        if (ev.type === 'step_start') {
+          const steps = [...cur.steps];
+          steps[ev.index] = { ...steps[ev.index], status: 'running' };
+          return { ...prev, [workspaceId]: { ...cur, steps } };
+        }
+        if (ev.type === 'step_done') {
+          const steps = [...cur.steps];
+          steps[ev.index] = { ...steps[ev.index], status: 'done', result: ev.result };
+          return { ...prev, [workspaceId]: { ...cur, steps } };
+        }
+        if (ev.type === 'step_error') {
+          const steps = [...cur.steps];
+          steps[ev.index] = { ...steps[ev.index], status: 'error', error: ev.error };
+          return { ...prev, [workspaceId]: { ...cur, steps } };
+        }
+        if (ev.type === 'done') {
+          return { ...prev, [workspaceId]: { ...cur, summary: ev.summary } };
+        }
+        return prev;
+      });
+    });
+
+    window.api.koda.onDone(({ workspaceId, error }) => {
+      setKodaStates(prev => ({
+        ...prev,
+        [workspaceId]: {
+          ...(prev[workspaceId] ?? EMPTY_KODA_STATE),
+          running: false,
+          planning: false,
+          error: error ?? null,
+        },
+      }));
+    });
+
+    return () => window.api.koda.off();
+  }, []);
+
   function updateWorkspace(id: string, updater: (ws: Workspace) => Workspace) {
     setWorkspaces(prev => prev.map(ws => ws.id === id ? updater(ws) : ws));
+  }
+
+  // ── KODA mode + actions ────────────────────────────────────────────────────
+
+  const runningWorkspaceIds = useMemo(
+    () => new Set(Object.entries(kodaStates).filter(([, s]) => s.running).map(([id]) => id)),
+    [kodaStates],
+  );
+
+  function toggleKodaMode() {
+    setWorkspaces(prev => prev.map(ws =>
+      ws.id === activeWorkspaceId
+        ? { ...ws, mode: (ws.mode === 'koda' ? 'chat' : 'koda') as 'chat' | 'koda' }
+        : ws
+    ));
+  }
+
+  async function handleKodaRun(task: string) {
+    const ws = getActiveWorkspace();
+    if (!ws?.projectRoot) return;
+    setKodaStates(prev => ({
+      ...prev,
+      [ws.id]: { ...EMPTY_KODA_STATE, planning: true, pendingTask: task },
+    }));
+    const result = await window.api.koda.plan(ws.projectRoot, task);
+    if (result.error || !result.plan) {
+      setKodaStates(prev => ({
+        ...prev,
+        [ws.id]: { ...EMPTY_KODA_STATE, error: result.error ?? 'Could not generate a plan.' },
+      }));
+      return;
+    }
+    const plan = result.plan as import('./components/KodaPanel').CeoPlan;
+    setKodaStates(prev => ({
+      ...prev,
+      [ws.id]: {
+        ...EMPTY_KODA_STATE,
+        confirming: true,
+        pendingTask: task,
+        plan,
+        steps: plan.steps.map((step: import('./components/KodaPanel').CeoStep) => ({ step, status: 'pending' as const })),
+      },
+    }));
+  }
+
+  function handleKodaConfirm() {
+    const ws = getActiveWorkspace();
+    if (!ws?.projectRoot) return;
+    const state = kodaStates[ws.id];
+    if (!state?.plan || !state.pendingTask) return;
+    setKodaStates(prev => ({
+      ...prev,
+      [ws.id]: { ...state, confirming: false, running: true },
+    }));
+    window.api.koda.run(ws.id, ws.projectRoot, state.pendingTask, state.plan);
+  }
+
+  function handleKodaCancel() {
+    const ws = getActiveWorkspace();
+    if (!ws) return;
+    setKodaStates(prev => ({ ...prev, [ws.id]: EMPTY_KODA_STATE }));
+  }
+
+  function handleKodaStop() {
+    const ws = getActiveWorkspace();
+    if (!ws) return;
+    window.api.koda.stop(ws.id);
+    setKodaStates(prev => ({
+      ...prev,
+      [ws.id]: { ...(prev[ws.id] ?? EMPTY_KODA_STATE), running: false, planning: false, confirming: false },
+    }));
   }
 
   function getActiveWorkspace() {
@@ -651,29 +794,47 @@ export default function App() {
   const activeWorkspace = getActiveWorkspace();
   const activeDiffChat = activeWorkspace?.chats.find(c => c.pendingDiff);
 
+  const isKodaMode = activeWorkspace?.mode === 'koda';
+  const activeKodaState = kodaStates[activeWorkspaceId] ?? EMPTY_KODA_STATE;
+
   return (
     <div className="app">
       <WorkspaceRail
         workspaces={workspaces}
         activeId={activeWorkspaceId}
+        activeMode={activeWorkspace?.mode ?? 'chat'}
+        runningWorkspaceIds={runningWorkspaceIds}
         onSelect={setActiveWorkspaceId}
         onAdd={addWorkspace}
+        onToggleKoda={toggleKodaMode}
         onOpenSettings={() => setShowSettings(true)}
       />
 
       <div className="chats-panel-wrap" style={{ width: chatsPanelWidth }}>
-        <ChatsPanel
-          workspace={activeWorkspace}
-          streamingChatIds={streamingChatIds}
-          onOpenProject={openProject}
-          onAddChat={addChat}
-          onDeleteChat={deleteChat}
-          onToggleExpand={toggleChatExpanded}
-          onSetModel={setChatModel}
-          onSendMessage={sendMessage}
-          onEditInstruction={handleEditInstruction}
-          onStop={(chatId: string) => { wasInterruptedChatIds.current.add(chatId); window.api.stopStreaming(chatId); }}
-        />
+        {isKodaMode ? (
+          <KodaPanel
+            workspaceId={activeWorkspaceId}
+            projectRoot={activeWorkspace?.projectRoot ?? null}
+            kodaState={activeKodaState}
+            onRun={handleKodaRun}
+            onConfirm={handleKodaConfirm}
+            onCancel={handleKodaCancel}
+            onStop={handleKodaStop}
+          />
+        ) : (
+          <ChatsPanel
+            workspace={activeWorkspace}
+            streamingChatIds={streamingChatIds}
+            onOpenProject={openProject}
+            onAddChat={addChat}
+            onDeleteChat={deleteChat}
+            onToggleExpand={toggleChatExpanded}
+            onSetModel={setChatModel}
+            onSendMessage={sendMessage}
+            onEditInstruction={handleEditInstruction}
+            onStop={(chatId: string) => { wasInterruptedChatIds.current.add(chatId); window.api.stopStreaming(chatId); }}
+          />
+        )}
       </div>
 
       <div className="resize-handle" onMouseDown={handleResizeStart} />

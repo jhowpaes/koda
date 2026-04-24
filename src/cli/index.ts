@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { execSync } from 'child_process';
 import { config } from '../config.js';
 import { createProvider } from '../llm/provider.js';
 import { Agent } from '../core/agent.js';
@@ -166,6 +167,46 @@ program
     await runTask(getAgent(), task);
   });
 
+// ─── chat helpers ─────────────────────────────────────────────────────────────
+
+// Detects @src/foo/bar.ts references, reads each file and appends content to message.
+function injectFileRefs(msg: string): { content: string; injected: string[] } {
+  const injected: string[] = [];
+  const appended: string[] = [];
+
+  const content = msg.replace(/@([\w.\-/]+\.\w+)/g, (match, ref) => {
+    const filePath = path.resolve(projectRoot(), ref);
+    if (!fs.existsSync(filePath)) return match;
+    const fileContent = fs.readFileSync(filePath, 'utf-8');
+    const ext = path.extname(ref).slice(1);
+    injected.push(ref);
+    appended.push(`### ${ref}\n\`\`\`${ext}\n${fileContent.slice(0, 6000)}\n\`\`\``);
+    return match;
+  });
+
+  return {
+    content: appended.length ? `${content}\n\n${appended.join('\n\n')}` : content,
+    injected,
+  };
+}
+
+// Runs a shell command and returns { success, output } — never throws.
+function runShellCommand(cmd: string): { success: boolean; output: string } {
+  try {
+    const output = execSync(cmd, {
+      cwd: projectRoot(),
+      encoding: 'utf-8',
+      timeout: 60000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { success: true, output: output.trim() };
+  } catch (err: unknown) {
+    const e = err as { stdout?: string; stderr?: string };
+    const output = [e.stdout, e.stderr].filter(Boolean).join('\n').trim();
+    return { success: false, output: output || String(err) };
+  }
+}
+
 // ─── chat ─────────────────────────────────────────────────────────────────────
 
 program
@@ -185,7 +226,8 @@ program
     console.log(chalk.bold.cyan('\nAI Chat'));
     showProject();
     if (histLen > 0) console.log(chalk.dim(`Resuming session (${histLen / 2} previous turns)`));
-    console.log(chalk.dim('Commands: /clear  /model <name>  /context  /history  /exit\n'));
+    console.log(chalk.dim('Commands: /clear  /model <name>  /context  /history  /run <cmd>  /exit'));
+    console.log(chalk.dim('Tips:     @src/foo.ts  to attach a file\n'));
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -220,8 +262,29 @@ program
           loop(); return;
         }
 
+        // /run <cmd> — executes a shell command and sends output to the LLM
+        if (msg.startsWith('/run ')) {
+          const cmd = msg.slice(5).trim();
+          if (!cmd) { loop(); return; }
+          console.log(chalk.dim(`\n$ ${cmd}\n`));
+          const { success, output } = runShellCommand(cmd);
+          const icon = success ? chalk.green('✓') : chalk.red('✕');
+          console.log(`${icon} ${output || '(no output)'}\n`);
+          const context = `I ran \`${cmd}\`.\n\n${success ? 'Output' : 'Error'}:\n${output}`;
+          process.stdout.write(chalk.bold('ai › '));
+          await agent.chat(context);
+          process.stdout.write('\n');
+          loop(); return;
+        }
+
+        // @file references — inject file content into the message before sending
+        const { content, injected } = injectFileRefs(msg);
+        if (injected.length > 0) {
+          console.log(chalk.dim(`  Attached: ${injected.join(', ')}\n`));
+        }
+
         process.stdout.write(chalk.bold('\nai › '));
-        await agent.chat(msg);
+        await agent.chat(content);
         process.stdout.write('\n');
         loop();
       });

@@ -53,6 +53,35 @@ contextBridge.exposeInMainWorld('api', {
   applyEdit: (filePath: string, content: string) =>
     ipcRenderer.invoke('agent:applyEdit', { filePath, content }),
 
+  // ── koda CEO ──────────────────────────────────────────────────────────────
+  koda: {
+    plan: (projectRoot: string, task: string, kodaWorkspace?: unknown) =>
+      ipcRenderer.invoke('koda:plan', { projectRoot, task, kodaWorkspace }),
+    run: (workspaceId: string, projectRoot: string, task: string, plan?: unknown, kodaWorkspace?: unknown) =>
+      ipcRenderer.send('koda:run', { workspaceId, projectRoot, task, plan, kodaWorkspace }),
+    stop: (workspaceId: string) => ipcRenderer.invoke('koda:stop', workspaceId),
+    onProgress: (cb: (data: { workspaceId: string; event: unknown }) => void) => {
+      ipcRenderer.on('koda:progress', (_, data) => cb(data));
+    },
+    onDone: (cb: (data: { workspaceId: string; error?: string }) => void) => {
+      ipcRenderer.on('koda:done', (_, data) => cb(data));
+    },
+    off: () => {
+      ipcRenderer.removeAllListeners('koda:progress');
+      ipcRenderer.removeAllListeners('koda:done');
+    },
+    tts: (text: string, cfg: unknown) => ipcRenderer.invoke('koda:tts', { text, config: cfg }),
+    stt: (audioData: string) => ipcRenderer.invoke('koda:stt', { audioData }),
+    spokenSummary: (data: { task: string; steps: unknown[]; kodaWorkspace?: unknown }) =>
+      ipcRenderer.invoke('koda:spokenSummary', data),
+    getConfig: () => ipcRenderer.invoke('koda:getConfig'),
+    saveConfig: (cfg: unknown) => ipcRenderer.invoke('koda:saveConfig', cfg),
+    listWorkspaces: () => ipcRenderer.invoke('koda:listWorkspaces'),
+  },
+
+  // ── permissions ───────────────────────────────────────────────────────────
+  requestMicPermission: () => ipcRenderer.invoke('permissions:microphone'),
+
   // ── git ────────────────────────────────────────────────────────────────────
   gitDiff: (root: string) => ipcRenderer.invoke('git:diff', root),
   gitCommit: (root: string, message: string) => ipcRenderer.invoke('git:commit', { root, message }),

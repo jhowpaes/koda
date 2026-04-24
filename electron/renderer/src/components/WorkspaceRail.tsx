@@ -4,20 +4,23 @@ import { Workspace } from '../App';
 interface Props {
   workspaces: Workspace[];
   activeId: string;
+  activeMode: 'chat' | 'koda';
+  runningWorkspaceIds: Set<string>;
   onSelect: (id: string) => void;
   onAdd: () => void;
+  onToggleKoda: () => void;
   onOpenSettings: () => void;
 }
 
 const WS_COLORS = [
-  '#238be6', // blue
-  '#3fb950', // green
-  '#a371f7', // purple
-  '#f0883e', // orange
-  '#f85149', // red
-  '#39d5ff', // cyan
-  '#f778ba', // pink
-  '#e3b341', // yellow
+  '#238be6',
+  '#3fb950',
+  '#a371f7',
+  '#f0883e',
+  '#f85149',
+  '#39d5ff',
+  '#f778ba',
+  '#e3b341',
 ];
 
 function getInitials(name: string): string {
@@ -26,7 +29,10 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
 
-export default memo(function WorkspaceRail({ workspaces, activeId, onSelect, onAdd, onOpenSettings }: Props) {
+export default memo(function WorkspaceRail({
+  workspaces, activeId, activeMode, runningWorkspaceIds,
+  onSelect, onAdd, onToggleKoda, onOpenSettings,
+}: Props) {
   return (
     <div className="workspace-rail">
       <div className="rail-drag-area" />
@@ -34,6 +40,7 @@ export default memo(function WorkspaceRail({ workspaces, activeId, onSelect, onA
       {workspaces.map((ws, i) => {
         const color = WS_COLORS[i % WS_COLORS.length];
         const isActive = ws.id === activeId;
+        const isRunning = runningWorkspaceIds.has(ws.id);
         return (
           <button
             key={ws.id}
@@ -47,6 +54,7 @@ export default memo(function WorkspaceRail({ workspaces, activeId, onSelect, onA
           >
             <span className="workspace-initials">{getInitials(ws.name)}</span>
             <span className="workspace-badge">{ws.chats.length}</span>
+            {isRunning && <span className="workspace-running-dot" />}
           </button>
         );
       })}
@@ -54,6 +62,14 @@ export default memo(function WorkspaceRail({ workspaces, activeId, onSelect, onA
       <button className="workspace-add-btn" onClick={onAdd} title="New workspace">+</button>
 
       <div className="rail-spacer" />
+
+      <button
+        className={`rail-koda-btn ${activeMode === 'koda' ? 'active' : ''}`}
+        onClick={onToggleKoda}
+        title={activeMode === 'koda' ? 'Switch to Chat' : 'Switch to KODA CEO'}
+      >
+        ⚡
+      </button>
 
       <button className="rail-settings-btn" onClick={onOpenSettings} title="Settings">
         ⚙

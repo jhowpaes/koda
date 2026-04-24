@@ -5,7 +5,8 @@
   "type": "module",
   "main": "out/main/index.cjs",
   "bin": {
-    "ai": "./dist/index.js"
+    "ai":   "./dist/index.js",
+    "koda": "./dist/ceo/cli.js"
   },
   "scripts": {
     "build": "tsup",
@@ -82,6 +83,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.0",
     "@electron-toolkit/utils": "^3.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@uiw/codemirror-extensions-langs": "^4.25.9",
     "@uiw/codemirror-theme-dracula": "^4.25.9",
     "@uiw/codemirror-theme-vscode": "^4.25.9",
