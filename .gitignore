@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.local
+
+# Build outputs
+dist/
+out/
+build/
+release/
+
+# Electron builder
+*.dmg
+*.dmg.blockmap
+*.exe
+*.AppImage
+*.snap
+*.deb
+*.rpm
+*.pkg
+builder-debug.yml
+builder-effective-config.yaml
+
+# Source maps
+*.js.map
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Screenshots / media
+*.png
+*.jpg
+*.jpeg
+!src/**/*.png
+!src/**/*.jpg
+!src/**/*.svg
+!build/icon.*
+
+# Claude / AI context (personal settings)
+.claude/
+
+# Logs
+*.log
+npm-debug.log*
+
+# TypeScript cache
+*.tsbuildinfo

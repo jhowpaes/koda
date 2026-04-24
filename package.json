@@ -1,0 +1,112 @@
+{
+  "name": "koda",
+  "version": "0.2.0",
+  "description": "AI coding assistant desktop app",
+  "type": "module",
+  "main": "out/main/index.cjs",
+  "bin": {
+    "ai": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/cli/index.ts",
+    "start": "tsx src/cli/index.ts",
+    "link": "npm run build && chmod +x dist/index.js && npm link",
+    "desktop": "ELECTRON_RUN_AS_NODE='' electron-vite dev",
+    "desktop:build": "electron-vite build",
+    "desktop:preview": "ELECTRON_RUN_AS_NODE='' electron-vite preview",
+    "dist": "electron-vite build && electron-builder",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:linux": "electron-vite build && electron-builder --linux",
+    "gen-icon": "bash scripts/gen-icon.sh"
+  },
+  "build": {
+    "appId": "com.koda.desktop",
+    "productName": "Koda",
+    "copyright": "Copyright © 2026 Koda Contributors",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "!out/**/*.map"
+    ],
+    "afterSign": "build/notarize.cjs",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "identity": "Koda Contributors",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "Koda ${version}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.0",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@uiw/codemirror-extensions-langs": "^4.25.9",
+    "@uiw/codemirror-theme-dracula": "^4.25.9",
+    "@uiw/codemirror-theme-vscode": "^4.25.9",
+    "@uiw/react-codemirror": "^4.25.9",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "diff": "^5.2.0",
+    "dotenv": "^16.4.5",
+    "openai": "^4.52.0"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron/notarize": "^3.1.1",
+    "@types/diff": "^5.2.1",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^2.3.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.15.0",
+    "typescript": "^5.5.0"
+  }
+}

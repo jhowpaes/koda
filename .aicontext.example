@@ -1,0 +1,29 @@
+# Nome do Projeto
+
+Breve descrição do que o projeto faz.
+
+## Stack
+
+- Node.js + TypeScript
+- Express + Zod
+- Prisma + PostgreSQL
+
+## Convenções
+
+- Sempre usar async/await, nunca callbacks
+- Erros devem usar a classe AppError de src/lib/errors.ts
+- Validação de input via Zod em todos os endpoints
+- Funções devem ter tipos de retorno explícitos
+
+## Arquivos chave
+
+- src/types/index.ts — tipos compartilhados
+- src/lib/prisma.ts — cliente do banco
+- src/lib/errors.ts — classe de erro customizada
+- src/middleware/auth.ts — middleware de autenticação
+
+## O que NÃO fazer
+
+- Não usar `any` no TypeScript
+- Não commitar secrets ou .env
+- Não fazer queries N+1 sem include do Prisma
