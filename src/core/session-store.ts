@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import type { Message } from '../llm/types.js';
 import { projectRoot } from '../utils/git.js';
 
-const SESSIONS_DIR = path.join(os.homedir(), '.ai-sessions');
+const SESSIONS_DIR = path.join(os.homedir(), '.koda', 'sessions');
 const MAX_MESSAGES = 20;
 
 interface Session {

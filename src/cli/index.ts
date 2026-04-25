@@ -48,7 +48,7 @@ program
   .command('setup')
   .description('Configure API key and default settings')
   .action(async () => {
-    const configDir = path.join(os.homedir(), '.ai');
+    const configDir = path.join(os.homedir(), '.koda');
     const configFile = path.join(configDir, '.env');
     fs.mkdirSync(configDir, { recursive: true });
 

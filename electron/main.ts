@@ -116,7 +116,7 @@ ipcMain.handle('fs:writeFile', (_, { filePath, content }: { filePath: string; co
 
 ipcMain.handle('koda:loadHistory', (_, projectRoot: string) => {
   try {
-    const file = path.join(projectRoot, '.codeai', 'koda-history.json');
+    const file = path.join(projectRoot, '.koda', 'koda-history.json');
     if (!fs.existsSync(file)) return [];
     return JSON.parse(fs.readFileSync(file, 'utf-8'));
   } catch { return []; }
@@ -124,7 +124,7 @@ ipcMain.handle('koda:loadHistory', (_, projectRoot: string) => {
 
 ipcMain.handle('koda:saveHistory', (_, { projectRoot, entry }: { projectRoot: string; entry: unknown }) => {
   try {
-    const dir  = path.join(projectRoot, '.codeai');
+    const dir  = path.join(projectRoot, '.koda');
     const file = path.join(dir, 'koda-history.json');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const existing: unknown[] = fs.existsSync(file)
@@ -138,14 +138,14 @@ ipcMain.handle('koda:saveHistory', (_, { projectRoot, entry }: { projectRoot: st
 
 ipcMain.handle('fs:loadChats', (_, projectRoot: string) => {
   try {
-    const raw = fs.readFileSync(path.join(projectRoot, '.codeai', 'chats.json'), 'utf-8');
+    const raw = fs.readFileSync(path.join(projectRoot, '.koda', 'chats.json'), 'utf-8');
     return JSON.parse(raw);
   } catch { return null; }
 });
 
 ipcMain.handle('fs:saveChats', (_, { projectRoot, chats }: { projectRoot: string; chats: unknown[] }) => {
   try {
-    const dir = path.join(projectRoot, '.codeai');
+    const dir = path.join(projectRoot, '.koda');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'chats.json'), JSON.stringify(chats, null, 2), 'utf-8');
     return { ok: true };

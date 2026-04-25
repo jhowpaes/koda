@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const CACHE_DIR = path.join(os.homedir(), '.ai-cache');
+const CACHE_DIR = path.join(os.homedir(), '.koda', 'cache');
 
 function key(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex').slice(0, 16);

@@ -4,7 +4,7 @@ import os from 'os';
 import { loadProjectConfig } from './context/project.js';
 
 // global config: ~/.ai/.env  (where the API key lives)
-dotenv.config({ path: path.join(os.homedir(), '.ai', '.env') });
+dotenv.config({ path: path.join(os.homedir(), '.koda', '.env') });
 // local .env overrides (useful during development of code-ai itself)
 dotenv.config();
 
