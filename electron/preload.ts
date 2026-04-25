@@ -57,8 +57,8 @@ contextBridge.exposeInMainWorld('api', {
   koda: {
     plan: (projectRoot: string, task: string, kodaWorkspace?: unknown) =>
       ipcRenderer.invoke('koda:plan', { projectRoot, task, kodaWorkspace }),
-    run: (workspaceId: string, projectRoot: string, task: string, plan?: unknown, kodaWorkspace?: unknown) =>
-      ipcRenderer.send('koda:run', { workspaceId, projectRoot, task, plan, kodaWorkspace }),
+    run: (workspaceId: string, projectRoot: string, task: string, plan?: unknown, kodaWorkspace?: unknown, settings?: unknown) =>
+      ipcRenderer.send('koda:run', { workspaceId, projectRoot, task, plan, kodaWorkspace, settings }),
     stop: (workspaceId: string) => ipcRenderer.invoke('koda:stop', workspaceId),
     onProgress: (cb: (data: { workspaceId: string; event: unknown }) => void) => {
       ipcRenderer.on('koda:progress', (_, data) => cb(data));
@@ -66,9 +66,13 @@ contextBridge.exposeInMainWorld('api', {
     onDone: (cb: (data: { workspaceId: string; error?: string }) => void) => {
       ipcRenderer.on('koda:done', (_, data) => cb(data));
     },
+    onChats: (cb: (data: { workspaceId: string; chats: Array<{ chatId: string; title: string; model: string }> }) => void) => {
+      ipcRenderer.on('koda:chats', (_, data) => cb(data));
+    },
     off: () => {
       ipcRenderer.removeAllListeners('koda:progress');
       ipcRenderer.removeAllListeners('koda:done');
+      ipcRenderer.removeAllListeners('koda:chats');
     },
     tts: (text: string, cfg: unknown) => ipcRenderer.invoke('koda:tts', { text, config: cfg }),
     stt: (audioData: string) => ipcRenderer.invoke('koda:stt', { audioData }),
@@ -77,6 +81,8 @@ contextBridge.exposeInMainWorld('api', {
     getConfig: () => ipcRenderer.invoke('koda:getConfig'),
     saveConfig: (cfg: unknown) => ipcRenderer.invoke('koda:saveConfig', cfg),
     listWorkspaces: () => ipcRenderer.invoke('koda:listWorkspaces'),
+    loadHistory: (projectRoot: string) => ipcRenderer.invoke('koda:loadHistory', projectRoot),
+    saveHistory: (projectRoot: string, entry: unknown) => ipcRenderer.invoke('koda:saveHistory', { projectRoot, entry }),
   },
 
   // ── permissions ───────────────────────────────────────────────────────────

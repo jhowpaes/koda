@@ -19,9 +19,16 @@ export interface AgentConfig {
   skills: string;
 }
 
+export interface KodaRouting {
+  code?:   { providerId: string; model: string };
+  review?: { providerId: string; model: string };
+  git?:    { providerId: string; model: string };
+}
+
 export interface AppSettings {
   providers: LLMProvider[];
   agents: AgentConfig[];
+  kodaRouting?: KodaRouting;
 }
 
 // ── persistence ───────────────────────────────────────────────────────────────
@@ -321,6 +328,20 @@ export default memo(function SettingsModal({ onClose }: Props) {
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
   const [agentDraft, setAgentDraft] = useState<Partial<AgentConfig>>({});
   const [generating, setGenerating] = useState(false);
+
+  // ── KODA routing ──────────────────────────────────────────────────────────
+  const [kodaRouting, setKodaRouting] = useState<KodaRouting>(settings.kodaRouting ?? {});
+
+  function updateKodaRouting(agent: 'code' | 'review' | 'git', patch: Partial<{ providerId: string; model: string }> | null) {
+    const next: KodaRouting = { ...kodaRouting };
+    if (patch === null) {
+      delete next[agent];
+    } else {
+      next[agent] = { ...({ providerId: '', model: '' }), ...(next[agent] ?? {}), ...patch };
+    }
+    setKodaRouting(next);
+    save({ ...settings, kodaRouting: next });
+  }
 
   // ── KODA config (stored in ~/.koda/config.json via IPC) ───────────────────
   const [kodaConfig, setKodaConfig] = useState<KodaConfig>(DEFAULT_KODA_CONFIG);
@@ -656,6 +677,74 @@ Return ONLY the system prompt text, nothing else.`;
             <div className="settings-section">
               <div className="koda-settings-note">
                 Saved to <code>~/.koda/config.json</code> — shared with the CLI.
+              </div>
+
+              {/* Model Routing */}
+              <div className="provider-card">
+                <div className="provider-header">
+                  <span className="settings-section-title">🧠 Model Routing</span>
+                </div>
+                <p className="settings-hint" style={{ marginBottom: 8 }}>
+                  Assign specific models to each KODA agent. Leave empty to use the default provider.
+                </p>
+
+                {([
+                  { key: 'code'   as const, label: '⚡ Code Agent',   hint: 'Implementation, editing, file changes' },
+                  { key: 'review' as const, label: '🔍 Review Agent', hint: 'Code review, analysis, quality checks' },
+                  { key: 'git'    as const, label: '🌿 Git Agent',    hint: 'Commits, branches, push/pull' },
+                ] as const).map(({ key, label, hint }) => {
+                  const entry = kodaRouting[key];
+                  const selectedProvider = settings.providers.find(p => p.id === entry?.providerId);
+                  const availableModels = selectedProvider
+                    ? selectedProvider.models.split(',').map(m => m.trim()).filter(Boolean)
+                    : [];
+
+                  return (
+                    <div key={key} className="koda-routing-row">
+                      <div className="koda-routing-label">
+                        <span>{label}</span>
+                        <span className="settings-hint">{hint}</span>
+                      </div>
+                      <div className="koda-routing-selects">
+                        <select
+                          className="settings-input settings-select"
+                          value={entry?.providerId ?? ''}
+                          onChange={e => {
+                            const pid = e.target.value;
+                            if (!pid) { updateKodaRouting(key, null); return; }
+                            const firstModel = settings.providers.find(p => p.id === pid)?.models.split(',')[0].trim() ?? '';
+                            updateKodaRouting(key, { providerId: pid, model: firstModel });
+                          }}
+                        >
+                          <option value="">— default —</option>
+                          {settings.providers.filter(p => p.enabled && p.models).map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+
+                        {entry && availableModels.length > 0 && (
+                          <select
+                            className="settings-input settings-select"
+                            value={entry.model}
+                            onChange={e => updateKodaRouting(key, { model: e.target.value })}
+                          >
+                            {availableModels.map(m => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        )}
+                        {entry && availableModels.length === 0 && (
+                          <input
+                            className="settings-input"
+                            placeholder="model name"
+                            value={entry.model}
+                            onChange={e => updateKodaRouting(key, { model: e.target.value })}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* TTS */}

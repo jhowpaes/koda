@@ -38,6 +38,22 @@ export interface FileNode {
   children?: FileNode[];
 }
 
+export interface KodaHistoryStep {
+  agent: string;
+  description: string;
+  result?: string;
+  error?: string;
+}
+
+export interface KodaHistoryEntry {
+  id: string;
+  timestamp: string;
+  task: string;
+  complexity?: string;
+  steps: KodaHistoryStep[];
+  summary: string;
+}
+
 export interface DiffData {
   filePath: string;
   original: string;
@@ -71,16 +87,19 @@ declare global {
     api: {
       koda: {
         plan: (projectRoot: string, task: string, ws?: unknown) => Promise<{ plan?: unknown; error?: string }>;
-        run: (workspaceId: string, projectRoot: string, task: string, plan?: unknown, ws?: unknown) => void;
+        run: (workspaceId: string, projectRoot: string, task: string, plan?: unknown, ws?: unknown, settings?: unknown) => void;
         stop: (workspaceId: string) => Promise<void>;
         onProgress: (cb: (data: { workspaceId: string; event: unknown }) => void) => void;
         onDone: (cb: (data: { workspaceId: string; error?: string }) => void) => void;
+        onChats: (cb: (data: { workspaceId: string; chats: Array<{ chatId: string; title: string; model: string }> }) => void) => void;
         off: () => void;
         tts: (text: string, cfg: unknown) => Promise<{ data?: string; error?: string }>;
         stt: (audioData: string) => Promise<{ text?: string; error?: string }>;
         getConfig: () => Promise<unknown>;
         saveConfig: (cfg: unknown) => Promise<{ ok?: boolean }>;
         listWorkspaces: () => Promise<unknown[]>;
+        loadHistory: (projectRoot: string) => Promise<KodaHistoryEntry[]>;
+        saveHistory: (projectRoot: string, entry: KodaHistoryEntry) => Promise<{ ok?: boolean }>;
       };
       openProject: () => Promise<string | null>;
       getFileTree: (dir: string) => Promise<FileNode[]>;
@@ -204,7 +223,8 @@ export default function App() {
   const [chatsPanelWidth, setChatsPanelWidth] = useState(() =>
     parseInt(localStorage.getItem('chatsPanelWidth') ?? '320')
   );
-  const [kodaStates, setKodaStates] = useState<Record<string, KodaState>>({});
+  const [kodaStates,   setKodaStates]   = useState<Record<string, KodaState>>({});
+  const [kodaHistories, setKodaHistories] = useState<Record<string, KodaHistoryEntry[]>>({});
 
   const streamingChatIdsRef = useRef<Set<string>>(new Set());
   const activeWorkspaceIdRef = useRef<string>(activeWorkspaceId);
@@ -241,6 +261,12 @@ export default function App() {
           setWorkspaces(prev => prev.map(w =>
             w.id === ws.id && w.chats.length === 0 ? { ...w, chats: [newChat()] } : w
           ));
+        }
+      }).catch(() => {});
+
+      window.api.koda.loadHistory(ws.projectRoot).then(entries => {
+        if (entries?.length) {
+          setKodaHistories(prev => ({ ...prev, [ws.id]: entries }));
         }
       }).catch(() => {});
     });
@@ -420,8 +446,71 @@ export default function App() {
   // ── KODA CEO events ────────────────────────────────────────────────────────
 
   useEffect(() => {
+    window.api.koda.onChats(({ workspaceId, chats }) => {
+      setWorkspaces(prev => prev.map(ws => {
+        if (ws.id !== workspaceId) return ws;
+        const kodaChats: ChatSession[] = chats.map(c => ({
+          id: c.chatId,
+          title: c.title,
+          model: c.model,
+          messages: [],
+          isExpanded: false,
+          pendingDiff: null,
+          editLoading: false,
+          pendingEditFile: null,
+        }));
+        // Remove chats from previous KODA runs, add new ones, switch to chat mode
+        const nonKodaChats = ws.chats.filter(c => !c.id.startsWith('koda-'));
+        return { ...ws, mode: 'chat' as const, chats: [...nonKodaChats, ...kodaChats] };
+      }));
+    });
+
     window.api.koda.onProgress(({ workspaceId, event }) => {
       const ev = event as KodaProgressEvent;
+
+      // step_start needs to update both koda state AND workspace chats — keep them separate
+      if (ev.type === 'step_start') {
+        const chatId        = (ev as any).chatId        as string | undefined;
+        const resolvedModel = (ev as any).resolvedModel as string | undefined;
+
+        setKodaStates(prev => {
+          const cur = prev[workspaceId] ?? { ...EMPTY_KODA_STATE };
+          const steps = [...cur.steps];
+          steps[ev.index] = { ...steps[ev.index], status: 'running', chatId, resolvedModel };
+          return { ...prev, [workspaceId]: { ...cur, steps } };
+        });
+
+        if (chatId) {
+          streamingChatIdsRef.current.add(chatId);
+          setStreamingChatIds(Array.from(streamingChatIdsRef.current));
+          setWorkspaces(wsPrev => wsPrev.map(ws => {
+            if (ws.id !== workspaceId) return ws;
+            // Only add messages if the chat doesn't already have a streaming message
+            const chat = ws.chats.find(c => c.id === chatId);
+            if (chat?.messages.some(m => m.streaming)) return ws;
+            return {
+              ...ws,
+              chats: ws.chats.map(c => {
+                if (c.id === chatId) {
+                  return {
+                    ...c,
+                    isExpanded: true,
+                    messages: [
+                      ...c.messages,
+                      { id: uid(), role: 'user' as const, content: ev.step.description },
+                      { id: uid(), role: 'assistant' as const, content: '', blocks: [], streaming: true },
+                    ],
+                  };
+                }
+                if (c.id.startsWith('koda-')) return { ...c, isExpanded: false };
+                return c;
+              }),
+            };
+          }));
+        }
+        return;
+      }
+
       setKodaStates(prev => {
         const cur = prev[workspaceId] ?? { ...EMPTY_KODA_STATE };
         if (ev.type === 'plan') {
@@ -434,11 +523,6 @@ export default function App() {
               steps: ev.plan.steps.map(step => ({ step, status: 'pending' as const })),
             },
           };
-        }
-        if (ev.type === 'step_start') {
-          const steps = [...cur.steps];
-          steps[ev.index] = { ...steps[ev.index], status: 'running' };
-          return { ...prev, [workspaceId]: { ...cur, steps } };
         }
         if (ev.type === 'step_done') {
           const steps = [...cur.steps];
@@ -458,15 +542,41 @@ export default function App() {
     });
 
     window.api.koda.onDone(({ workspaceId, error }) => {
-      setKodaStates(prev => ({
-        ...prev,
-        [workspaceId]: {
-          ...(prev[workspaceId] ?? EMPTY_KODA_STATE),
-          running: false,
-          planning: false,
-          error: error ?? null,
-        },
-      }));
+      setKodaStates(prev => {
+        const cur = prev[workspaceId] ?? EMPTY_KODA_STATE;
+        const next = { ...cur, running: false, planning: false, error: error ?? null };
+
+        // Persist history entry if we have a completed task
+        if (!error && cur.pendingTask && cur.summary) {
+          const ws = workspacesRef.current.find(w => w.id === workspaceId);
+          if (ws?.projectRoot) {
+            const entry: KodaHistoryEntry = {
+              id: String(Date.now()),
+              timestamp: new Date().toISOString(),
+              task: cur.pendingTask,
+              complexity: cur.plan?.complexity,
+              steps: cur.steps.map(s => ({
+                agent: s.step.agent,
+                description: s.step.description,
+                result: s.result,
+                error: s.error,
+              })),
+              summary: cur.summary,
+            };
+            window.api.koda.saveHistory(ws.projectRoot, entry).catch(() => {});
+            setKodaHistories(h => ({
+              ...h,
+              [workspaceId]: [entry, ...(h[workspaceId] ?? [])].slice(0, 100),
+            }));
+          }
+        }
+
+        return { ...prev, [workspaceId]: next };
+      });
+      // Return to KodaPanel view after execution finishes
+      setWorkspaces(prev => prev.map(ws =>
+        ws.id === workspaceId ? { ...ws, mode: 'koda' as const } : ws
+      ));
     });
 
     return () => window.api.koda.off();
@@ -528,7 +638,7 @@ export default function App() {
       ...prev,
       [ws.id]: { ...state, confirming: false, running: true },
     }));
-    window.api.koda.run(ws.id, ws.projectRoot, state.pendingTask, state.plan);
+    window.api.koda.run(ws.id, ws.projectRoot, state.pendingTask, state.plan, undefined, loadSettings());
   }
 
   function handleKodaCancel() {
@@ -795,7 +905,8 @@ export default function App() {
   const activeDiffChat = activeWorkspace?.chats.find(c => c.pendingDiff);
 
   const isKodaMode = activeWorkspace?.mode === 'koda';
-  const activeKodaState = kodaStates[activeWorkspaceId] ?? EMPTY_KODA_STATE;
+  const activeKodaState   = kodaStates[activeWorkspaceId] ?? EMPTY_KODA_STATE;
+  const activeKodaHistory = kodaHistories[activeWorkspaceId] ?? [];
 
   return (
     <div className="app">
@@ -816,6 +927,7 @@ export default function App() {
             workspaceId={activeWorkspaceId}
             projectRoot={activeWorkspace?.projectRoot ?? null}
             kodaState={activeKodaState}
+            history={activeKodaHistory}
             onRun={handleKodaRun}
             onConfirm={handleKodaConfirm}
             onCancel={handleKodaCancel}

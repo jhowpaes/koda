@@ -1,7 +1,10 @@
 import { app, BrowserWindow, ipcMain, dialog, systemPreferences } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { execSync, spawn, ChildProcess } from 'child_process';
+import { execSync, exec, spawn, ChildProcess } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 import Anthropic from '@anthropic-ai/sdk';
 
 const isDev = process.env.NODE_ENV === 'development' || !!process.env['ELECTRON_RENDERER_URL'];
@@ -57,6 +60,7 @@ function createWindow() {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
 
+
   return win;
 }
 
@@ -108,6 +112,28 @@ ipcMain.handle('fs:readBinary', (_, filePath: string) => {
 ipcMain.handle('fs:writeFile', (_, { filePath, content }: { filePath: string; content: string }) => {
   try { fs.writeFileSync(filePath, content, 'utf-8'); return { ok: true }; }
   catch (e) { return { error: (e as Error).message }; }
+});
+
+ipcMain.handle('koda:loadHistory', (_, projectRoot: string) => {
+  try {
+    const file = path.join(projectRoot, '.codeai', 'koda-history.json');
+    if (!fs.existsSync(file)) return [];
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch { return []; }
+});
+
+ipcMain.handle('koda:saveHistory', (_, { projectRoot, entry }: { projectRoot: string; entry: unknown }) => {
+  try {
+    const dir  = path.join(projectRoot, '.codeai');
+    const file = path.join(dir, 'koda-history.json');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const existing: unknown[] = fs.existsSync(file)
+      ? JSON.parse(fs.readFileSync(file, 'utf-8'))
+      : [];
+    const updated = [entry, ...existing].slice(0, 100); // keep last 100
+    fs.writeFileSync(file, JSON.stringify(updated, null, 2), 'utf-8');
+    return { ok: true };
+  } catch (e) { return { error: (e as Error).message }; }
 });
 
 ipcMain.handle('fs:loadChats', (_, projectRoot: string) => {
@@ -422,7 +448,7 @@ function truncate(text: string, maxLines: number, hint: string): string {
   return lines.slice(0, maxLines).join('\n') + `\n[... ${lines.length - maxLines} more lines truncated — ${hint}]`;
 }
 
-function runTool(root: string, name: string, input: Record<string, string>): string {
+async function runTool(root: string, name: string, input: Record<string, string>): Promise<string> {
   try {
     switch (name) {
       case 'read_file': {
@@ -460,19 +486,20 @@ function runTool(root: string, name: string, input: Record<string, string>): str
           ? `--include=${JSON.stringify(input.file_pattern)}`
           : '--include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" --include="*.py" --include="*.go" --include="*.rs" --include="*.swift" --include="*.kt"';
         try {
-          const out = execSync(
+          const { stdout } = await execAsync(
             `grep -r -n ${fileGlob} ${JSON.stringify(input.pattern)} ${JSON.stringify(dir)}`,
-            { encoding: 'utf-8', timeout: 10000 }
+            { encoding: 'utf-8', timeout: 15000 }
           );
-          return truncate(out.trim(), SEARCH_MAX_LINES, 'refine your search pattern or specify a subdirectory');
+          return truncate(stdout.trim(), SEARCH_MAX_LINES, 'refine your search pattern or specify a subdirectory');
         } catch (e: any) {
           const stdout = (e.stdout ?? '').trim();
           return stdout ? truncate(stdout, SEARCH_MAX_LINES, 'refine pattern') : 'No matches found';
         }
       }
       case 'bash': {
-        const out = execSync(input.command, { cwd: root, encoding: 'utf-8', timeout: 30000 });
-        return truncate(out.trim(), BASH_MAX_LINES, 'use a more specific command');
+        const { stdout, stderr } = await execAsync(input.command, { cwd: root, encoding: 'utf-8', timeout: 120000 });
+        const out = (stdout + (stderr ? `\n[stderr]\n${stderr}` : '')).trim();
+        return truncate(out, BASH_MAX_LINES, 'use a more specific command');
       }
       default:
         return 'Unknown tool';
@@ -498,13 +525,19 @@ function supportsThinking(model: string): boolean {
   return /^claude-(3-7|opus-4|sonnet-4|haiku-4)/.test(model);
 }
 
+// Tools whose outputs are worth capturing for inter-step context
+const CONTEXT_CAPTURE_TOOLS = new Set(['search_files', 'bash', 'list_dir']);
+
 async function runAnthropicAgentic(
   sender: Electron.WebContents,
   chatId: string,
   root: string, message: string, apiKey: string, model: string,
   signal: AbortSignal,
   customSystemPrompt?: string,
-) {
+  maxTurns = 20,
+): Promise<string> {
+  let finalText = '';
+  const toolLog: string[] = [];  // compact capture of key tool results for inter-step context
   const emit = (ev: AgentEvent) => sender.send('agent:event', { chatId, ...ev });
   const client = new Anthropic({ apiKey });
   const useThinking = supportsThinking(model);
@@ -513,7 +546,7 @@ async function runAnthropicAgentic(
     : agenticSystemPrompt(root);
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: message }];
 
-  for (let turn = 0; turn < 20; turn++) {
+  for (let turn = 0; turn < maxTurns; turn++) {
     if (signal.aborted) break;
     const params = {
       model, system: systemPrompt, tools: AGENTIC_TOOLS, messages,
@@ -543,7 +576,7 @@ async function runAnthropicAgentic(
       } else if (ev.type === 'content_block_delta') {
         const delta = ev.delta;
         if (delta.type === 'thinking_delta') emit({ type: 'thinking_delta', text: delta.thinking });
-        else if (delta.type === 'text_delta') emit({ type: 'text_delta', text: delta.text });
+        else if (delta.type === 'text_delta') { emit({ type: 'text_delta', text: delta.text }); finalText += delta.text; }
         else if (delta.type === 'input_json_delta') toolInputs[ev.index] = (toolInputs[ev.index] ?? '') + delta.partial_json;
       } else if (ev.type === 'content_block_stop') {
         const btype = blockTypes[ev.index];
@@ -566,12 +599,26 @@ async function runAnthropicAgentic(
     for (const block of final.content) {
       if (block.type !== 'tool_use') continue;
       const input = block.input as Record<string, string>;
-      const result = runTool(root, block.name, input);
+      const result = await runTool(root, block.name, input);
       emit({ type: 'tool_end', name: block.name });
       toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
+      // Capture key tool results so subsequent steps can use them without re-searching
+      if (CONTEXT_CAPTURE_TOOLS.has(block.name)) {
+        const label = toolLabel(block.name, input);
+        const snippet = result.length > 500 ? result.slice(0, 500).trimEnd() + '…' : result;
+        toolLog.push(`[${label}]\n${snippet}`);
+      }
     }
     messages.push({ role: 'user', content: toolResults });
   }
+
+  // If the agent produced no (or very short) text, append the tool log so
+  // subsequent steps have concrete findings instead of an empty context.
+  if (toolLog.length > 0 && finalText.trim().length < 100) {
+    finalText += (finalText ? '\n\n' : '') + '## Achados das ferramentas\n' + toolLog.join('\n\n');
+  }
+
+  return finalText;
 }
 
 async function runOpenAIAgentic(
@@ -580,7 +627,10 @@ async function runOpenAIAgentic(
   root: string, message: string, apiKey: string, baseUrl: string, model: string,
   signal: AbortSignal,
   customSystemPrompt?: string,
-) {
+  maxTurns = 20,
+): Promise<string> {
+  let finalText = '';
+  const toolLog: string[] = [];
   const emit = (ev: AgentEvent) => sender.send('agent:event', { chatId, ...ev });
   const { default: OpenAI } = await import('openai');
   const client = new OpenAI({ apiKey, baseURL: baseUrl || undefined });
@@ -600,7 +650,7 @@ async function runOpenAIAgentic(
     { role: 'user', content: message },
   ];
 
-  for (let turn = 0; turn < 20; turn++) {
+  for (let turn = 0; turn < maxTurns; turn++) {
     if (signal.aborted) break;
     const tcMap: Record<number, { id: string; name: string; args: string }> = {};
 
@@ -612,7 +662,7 @@ async function runOpenAIAgentic(
       if (signal.aborted) break;
       const delta = chunk.choices[0]?.delta;
       if (!delta) continue;
-      if (delta.content) emit({ type: 'text_delta', text: delta.content });
+      if (delta.content) { emit({ type: 'text_delta', text: delta.content }); finalText += delta.content; }
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
           const idx = tc.index ?? 0;
@@ -640,11 +690,22 @@ async function runOpenAIAgentic(
       let input: Record<string, string> = {};
       try { input = JSON.parse(tc.args || '{}'); } catch {}
       emit({ type: 'tool_start', name: tc.name, label: toolLabel(tc.name, input) });
-      const result = runTool(root, tc.name, input);
+      const result = await runTool(root, tc.name, input);
       emit({ type: 'tool_end', name: tc.name });
       messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+      if (CONTEXT_CAPTURE_TOOLS.has(tc.name)) {
+        const label = toolLabel(tc.name, input);
+        const snippet = result.length > 500 ? result.slice(0, 500).trimEnd() + '…' : result;
+        toolLog.push(`[${label}]\n${snippet}`);
+      }
     }
   }
+
+  if (toolLog.length > 0 && finalText.trim().length < 100) {
+    finalText += (finalText ? '\n\n' : '') + '## Achados das ferramentas\n' + toolLog.join('\n\n');
+  }
+
+  return finalText;
 }
 
 function agenticSystemPrompt(root: string): string {
@@ -703,6 +764,136 @@ ipcMain.on('agent:chat:agentic', async (event, {
     sender.send('agent:done', chatId);
   }
 });
+
+// ─── KODA helpers ────────────────────────────────────────────────────────────
+
+function kodaAgentIcon(agent: string): string {
+  if (agent === 'code')   return '⚡';
+  if (agent === 'review') return '🔍';
+  if (agent === 'git')    return '🌿';
+  return '•';
+}
+
+const STEP_FINDINGS_FOOTER = `
+
+## Regra de saída obrigatória
+Ao concluir, escreva SEMPRE um bloco de achados estruturado:
+
+## Achados
+- **Arquivo(s):** <caminhos encontrados ou "nenhum">
+- **Problema:** <descrição do problema real encontrado, ou "nenhum">
+- **Ação realizada:** <o que foi feito>
+- **Resultado:** <sucesso / falha / pendente>
+
+Este bloco é obrigatório — ele é passado como contexto ao próximo agente do pipeline para que ele não precise re-pesquisar.`;
+
+function kodaStepSystemPrompt(agentType: string): string {
+  const roles: Record<string, string> = {
+    code:   `Você é um agente especialista em engenharia de software. Execute a tarefa exatamente como solicitado usando as ferramentas disponíveis. Responda SEMPRE em português do Brasil.${STEP_FINDINGS_FOOTER}`,
+    review: `Você é um revisor de código sênior. Analise o código solicitado e forneça uma revisão estruturada com problemas (com referências de linha), sugestões e resumo geral. Responda SEMPRE em português do Brasil.${STEP_FINDINGS_FOOTER}`,
+    git:    `Você é um especialista em operações git e controle de versão. Execute as operações git necessárias usando o bash. Responda SEMPRE em português do Brasil.${STEP_FINDINGS_FOOTER}`,
+  };
+  return roles[agentType] ?? `Você é um assistente especialista. Execute a tarefa. Responda SEMPRE em português do Brasil.${STEP_FINDINGS_FOOTER}`;
+}
+
+// Per-tool scope rule: tells the agent EXACTLY what to do and WHEN to stop.
+// This prevents step 1 from doing the work of steps 2-4.
+const TOOL_SCOPE: Record<string, string> = {
+  ask:         '⚠️ ESCOPO: Sua ÚNICA responsabilidade é pesquisar e descrever o que encontrou. NÃO edite arquivos, NÃO execute builds/testes, NÃO tente resolver problemas. Quando tiver a resposta, escreva o bloco ## Achados e PARE imediatamente.',
+  explain_file:'⚠️ ESCOPO: Leia e explique este arquivo APENAS. Não edite, não execute, não analise outros arquivos. Escreva ## Achados e PARE.',
+  review_file: '⚠️ ESCOPO: Revise este arquivo APENAS. Não edite, não execute, não analise outros arquivos. Escreva ## Achados e PARE.',
+  run_command: '⚠️ ESCOPO: Execute APENAS este comando e reporte o output exato. NÃO edite arquivos, NÃO execute outros comandos, NÃO tente corrigir problemas encontrados. Escreva ## Achados e PARE.',
+  edit_file:   '⚠️ ESCOPO: Edite APENAS o arquivo especificado conforme a instrução. Não execute builds, não edite outros arquivos. Escreva ## Achados e PARE.',
+  run_task:    '⚠️ ESCOPO: Execute a tarefa de codificação especificada. Ao terminar, escreva ## Achados com os arquivos modificados e PARE — não execute builds ou testes (isso é o próximo passo).',
+  commit:      '⚠️ ESCOPO: Faça apenas o commit. Escreva ## Achados e PARE.',
+};
+
+function maxTurnsForTool(tool: string): number {
+  const map: Record<string, number> = {
+    ask: 6, explain_file: 6, review_file: 6,
+    run_command: 4, edit_file: 6, commit: 3,
+    run_task: 15,
+  };
+  return map[tool] ?? 8;
+}
+
+function kodaStepMessage(
+  step: { tool: string; args: Record<string, unknown>; description: string },
+  accumulatedContext?: string,
+): string {
+  const lines = [step.description];
+  if (step.args.file)        lines.push(`\nArquivo: ${step.args.file}`);
+  if (step.args.instruction) lines.push(`Instrução: ${step.args.instruction}`);
+  if (step.args.query)       lines.push(`Consulta: ${step.args.query}`);
+  if (step.args.task)        lines.push(`Tarefa: ${step.args.task}`);
+  if (step.args.command)     lines.push(`Comando: ${step.args.command}`);
+  if (accumulatedContext) {
+    lines.push(`\n--- Contexto dos passos anteriores (use para não re-pesquisar) ---\n${accumulatedContext}`);
+  }
+  const scope = TOOL_SCOPE[step.tool];
+  if (scope) lines.push(`\n${scope}`);
+  return lines.join('\n');
+}
+
+// ─── KODA model routing ───────────────────────────────────────────────────────
+
+interface StepConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  systemPrompt: string;
+}
+
+function resolveStepConfig(
+  agentType: string,
+  settings: any,
+  globalApiKey: string,
+  globalBaseUrl: string,
+  globalModel: string,
+): StepConfig {
+  const systemPrompt = kodaStepSystemPrompt(agentType);
+
+  // 1) Manual routing: settings.kodaRouting[agentType]
+  const routing = settings?.kodaRouting?.[agentType] as { providerId: string; model: string } | undefined;
+  if (routing?.providerId && routing?.model) {
+    const provider = (settings?.providers as any[] | undefined)?.find((p: any) => p.id === routing.providerId && p.enabled);
+    if (provider?.apiKey) {
+      return { apiKey: provider.apiKey, baseUrl: provider.baseUrl ?? '', model: routing.model, systemPrompt };
+    }
+  }
+
+  // 2) Skill-based: find a configured agent whose skills match the step type
+  const skillMap: Record<string, string[]> = {
+    code:   ['code', 'edit', 'implementation', 'software-engineer', 'refactoring', 'debugging', 'engineering'],
+    review: ['review', 'code-review', 'security', 'audit', 'quality'],
+    git:    ['git', 'version-control', 'devops'],
+  };
+  const targetSkills = skillMap[agentType] ?? [];
+  const matchingAgent = (settings?.agents as any[] | undefined)?.find((a: any) => {
+    if (!a.model) return false;
+    const agentSkills: string[] = (a.skills ?? '').split(',').map((s: string) => s.trim().toLowerCase());
+    return targetSkills.some(ts => agentSkills.includes(ts));
+  });
+  if (matchingAgent?.model) {
+    const modelId = matchingAgent.model as string;
+    const sp = matchingAgent.systemPrompt?.trim() ? matchingAgent.systemPrompt : systemPrompt;
+    // Try to find a provider that owns this model for a matching apiKey/baseUrl
+    const provider = (settings?.providers as any[] | undefined)?.find((p: any) =>
+      p.enabled && p.apiKey && p.models.split(',').map((m: string) => m.trim()).includes(modelId)
+    );
+    // Use the provider's credentials if found; otherwise fall back to global (CEO) credentials
+    // This ensures the agent's model and system prompt are always honoured
+    return {
+      apiKey:  provider?.apiKey  ?? globalApiKey,
+      baseUrl: provider?.baseUrl ?? globalBaseUrl,
+      model:   modelId,
+      systemPrompt: sp,
+    };
+  }
+
+  // 3) Global fallback
+  return { apiKey: globalApiKey, baseUrl: globalBaseUrl, model: globalModel, systemPrompt };
+}
 
 // ─── IPC: KODA CEO ───────────────────────────────────────────────────────────
 
@@ -802,51 +993,129 @@ ipcMain.handle('koda:plan', async (_, {
 });
 
 ipcMain.on('koda:run', async (event, {
-  workspaceId, projectRoot, task, kodaWorkspace, plan,
-}: { workspaceId: string; projectRoot: string; task: string; kodaWorkspace?: any; plan?: any }) => {
+  workspaceId, projectRoot, kodaWorkspace, plan, settings,
+}: { workspaceId: string; projectRoot: string; task?: string; kodaWorkspace?: any; plan?: any; settings?: any }) => {
   const sender = event.sender;
   kodaControllers.get(workspaceId)?.abort();
   const ctrl = new AbortController();
   kodaControllers.set(workspaceId, ctrl);
 
   try {
-    const { createProvider } = await import('../src/llm/provider.js');
-    const { CeoAgent } = await import('../src/ceo/agent.js');
     const { config } = await import('../src/config.js');
 
-    // Resolve agent binaries — built by tsup into dist/agents/ relative to project root
-    const agentsDir = app.isPackaged
-      ? path.join(process.resourcesPath, 'dist', 'agents')
-      : path.join(process.cwd(), 'dist', 'agents');
+    let apiKey: string;
+    let baseUrl: string;
+    let model: string;
 
-    let provider;
     if (kodaWorkspace) {
-      provider = createProvider({
-        apiKey:    kodaWorkspace.ceo.apiKey,
-        baseURL:   kodaWorkspace.ceo.baseURL ?? config.baseURL,
-        model:     kodaWorkspace.ceo.model,
-        maxTokens: kodaWorkspace.ceo.maxTokens ?? config.maxTokens,
-      });
+      apiKey  = kodaWorkspace.ceo.apiKey;
+      baseUrl = kodaWorkspace.ceo.baseURL ?? '';
+      model   = kodaWorkspace.ceo.model;
     } else {
       if (!config.apiKey) {
         sender.send('koda:done', { workspaceId, error: 'API key not configured. Run `ai setup` first.' });
         kodaControllers.delete(workspaceId);
         return;
       }
-      provider = createProvider(config);
+      apiKey  = config.apiKey;
+      baseUrl = config.baseURL ?? '';
+      model   = config.model;
     }
 
-    const ceo = new CeoAgent(provider, kodaWorkspace ?? undefined, agentsDir);
+    // Emit plan so the KODA panel can still show the plan overview
+    if (!ctrl.signal.aborted) sender.send('koda:progress', { workspaceId, event: { type: 'plan', plan } });
 
-    await ceo.run(task, {
-      projectRoot,
-      plan: plan ?? undefined,
-      onProgress: (ev) => {
-        if (!ctrl.signal.aborted) sender.send('koda:progress', { workspaceId, event: ev });
-      },
+    // Create a stable chatId per step and tell the renderer to open chat sessions
+    const ts = Date.now();
+    const chatIds: string[] = plan.steps.map((_: any, i: number) => `koda-${workspaceId}-${ts}-${i}`);
+
+    sender.send('koda:chats', {
+      workspaceId,
+      chats: plan.steps.map((step: any, i: number) => {
+        const cfg = resolveStepConfig(step.agent, settings, apiKey, baseUrl, model);
+        return {
+          chatId: chatIds[i],
+          title:  `${kodaAgentIcon(step.agent)} ${step.description.slice(0, 60)}`,
+          model:  cfg.model,
+        };
+      }),
     });
 
-    await ceo.close();
+    const stepResults: Array<{ step: any; result: string; error?: string }> = [];
+
+    // Compact context from completed steps to pass to the next one
+    const buildAccumulatedContext = (upToIndex: number): string => {
+      const parts: string[] = [];
+      for (let j = 0; j < upToIndex; j++) {
+        const r = stepResults[j];
+        if (!r || r.error) continue;
+        const snippet = r.result.length > 600 ? '…' + r.result.slice(-600).trimStart() : r.result;
+        parts.push(`=== Passo ${j + 1}: [${r.step.agent}] ${r.step.description} ===\n${snippet}`);
+      }
+      return parts.join('\n\n');
+    };
+
+    const executeStep = async (step: any, i: number): Promise<void> => {
+      if (ctrl.signal.aborted) return;
+
+      const chatId = chatIds[i];
+      const cfg = resolveStepConfig(step.agent, settings, apiKey, baseUrl, model);
+      sender.send('koda:progress', {
+        workspaceId,
+        event: { type: 'step_start', step, index: i, total: plan.steps.length, chatId, resolvedModel: cfg.model },
+      });
+
+      try {
+        const context = plan.parallel ? undefined : buildAccumulatedContext(i) || undefined;
+        const message = kodaStepMessage(step, context);
+        const isAnthropicModel = cfg.model.startsWith('claude') || cfg.baseUrl.includes('anthropic');
+
+        // Use real agentic runner with file system tools instead of dumb completion
+        const turns = maxTurnsForTool(step.tool);
+        const result = isAnthropicModel
+          ? await runAnthropicAgentic(sender, chatId, projectRoot, message, cfg.apiKey, cfg.model, ctrl.signal, cfg.systemPrompt, turns)
+          : await runOpenAIAgentic(sender, chatId, projectRoot, message, cfg.apiKey, cfg.baseUrl, cfg.model, ctrl.signal, cfg.systemPrompt, turns);
+
+        stepResults[i] = { step, result };
+        sender.send('agent:done', chatId);
+        if (!ctrl.signal.aborted) {
+          sender.send('koda:progress', { workspaceId, event: { type: 'step_done', step, index: i, result } });
+        }
+      } catch (err: any) {
+        const error = String(err?.message ?? err);
+        stepResults[i] = { step, result: '', error };
+        sender.send('agent:done', chatId);
+        if (!ctrl.signal.aborted && err?.name !== 'AbortError') {
+          sender.send('koda:progress', { workspaceId, event: { type: 'step_error', step, index: i, error } });
+        }
+      }
+    };
+
+    if (plan.parallel) {
+      await Promise.all(plan.steps.map((step: any, i: number) => executeStep(step, i)));
+    } else {
+      for (const [i, step] of plan.steps.entries()) {
+        await executeStep(step, i);
+        if (ctrl.signal.aborted) break;
+      }
+    }
+
+    if (!ctrl.signal.aborted) {
+      const summaryLines: string[] = [];
+      for (const [i, r] of stepResults.entries()) {
+        if (!r) continue;
+        summaryLines.push(`${r.error ? '✕' : '✓'} Passo ${i + 1} — [${r.step.agent}] ${r.step.description}`);
+        if (r.error) {
+          summaryLines.push(`  ⚠ ${r.error}`);
+        } else if (r.result) {
+          const tail = r.result.length > 600 ? '…' + r.result.slice(-600).trimStart() : r.result;
+          summaryLines.push(tail.split('\n').map((l: string) => `  ${l}`).join('\n'));
+        }
+        summaryLines.push('');
+      }
+      const summary = summaryLines.join('\n').trimEnd();
+      sender.send('koda:progress', { workspaceId, event: { type: 'done', summary } });
+    }
   } catch (e: any) {
     if (e?.name !== 'AbortError' && e?.code !== 'ERR_CANCELED') {
       sender.send('koda:progress', {
@@ -894,7 +1163,7 @@ ipcMain.handle('koda:stt', async (_, { audioData }: { audioData: string }) => {
     const client = new OpenAI({ apiKey: cfg.stt.apiKey });
     const buffer = Buffer.from(audioData, 'base64');
     const file = new File([buffer], 'audio.webm', { type: 'audio/webm' });
-    const transcription = await client.audio.transcriptions.create({ model: 'whisper-1', file });
+    const transcription = await client.audio.transcriptions.create({ model: 'whisper-1', file, language: 'pt' });
     return { text: transcription.text };
   } catch (e) {
     return { error: (e as Error).message };

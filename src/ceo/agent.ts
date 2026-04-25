@@ -67,10 +67,30 @@ export class CeoAgent {
 
     const stepResults: CeoResult['steps'] = [];
 
+    // Build a compact context string from all completed steps so far
+    const buildAccumulatedContext = (upToIndex: number): string => {
+      const parts: string[] = [];
+      for (let i = 0; i < upToIndex; i++) {
+        const r = stepResults[i];
+        if (!r || r.error) continue;
+        const snippet = r.result.length > 600 ? r.result.slice(0, 600).trimEnd() + '…' : r.result;
+        parts.push(`=== Passo ${i + 1}: [${r.step.agent}.${r.step.tool}] ${r.step.description} ===\n${snippet}`);
+      }
+      return parts.join('\n\n');
+    };
+
+    // Inject accumulated context into a step's args before execution
+    const enrichArgs = (step: CeoStep, context: string): CeoStep => {
+      if (!context) return step;
+      return { ...step, args: { ...step.args, context } };
+    };
+
     const executeStep = async (step: CeoStep, index: number): Promise<void> => {
+      const context = plan.parallel ? '' : buildAccumulatedContext(index);
+      const enrichedStep = enrichArgs(step, context);
       onProgress?.({ type: 'step_start', step, index, total: plan.steps.length });
       try {
-        const result = await this.client.callTool(step.agent, step.tool, step.args);
+        const result = await this.client.callTool(enrichedStep.agent, enrichedStep.tool, enrichedStep.args);
         stepResults[index] = { step, result };
         onProgress?.({ type: 'step_done', step, index, result });
       } catch (err) {
@@ -92,16 +112,24 @@ export class CeoAgent {
 
     const completed = stepResults.filter(r => !r?.error);
     const failed    = stepResults.filter(r =>  r?.error);
-    const lines: string[] = [`✓ ${completed.length} passo(s) concluído(s)`];
-    if (failed.length > 0) lines.push(`✕ ${failed.length} passo(s) com falha`);
+    const lines: string[] = [`✓ ${completed.length} passo(s) concluído(s)${failed.length > 0 ? ` · ✕ ${failed.length} com falha` : ''}`];
     lines.push('');
-    for (const r of stepResults) {
+    for (const [i, r] of stepResults.entries()) {
       if (!r) continue;
       const icon = r.error ? '✕' : '✓';
-      lines.push(`${icon} [${r.step.agent}] ${r.step.tool} — ${r.step.description}`);
-      if (r.error) lines.push(`  Erro: ${r.error}`);
+      lines.push(`${icon} Passo ${i + 1} — [${r.step.agent}] ${r.step.description}`);
+      if (r.error) {
+        lines.push(`   ⚠ Erro: ${r.error}`);
+      } else if (r.result) {
+        // Show the tail of the result (conclusions, not preamble) up to 600 chars
+        const tail = r.result.length > 600
+          ? '…' + r.result.slice(-600).trimStart()
+          : r.result;
+        lines.push(tail.split('\n').map(l => `   ${l}`).join('\n'));
+      }
+      lines.push('');
     }
-    const summary = lines.join('\n');
+    const summary = lines.join('\n').trimEnd();
 
     onProgress?.({ type: 'done', summary });
     return { plan, steps: stepResults, summary };

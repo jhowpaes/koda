@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import type { KodaHistoryEntry } from '../App';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ export interface CeoPlan {
 
 export type KodaProgressEvent =
   | { type: 'plan'; plan: CeoPlan }
-  | { type: 'step_start'; step: CeoStep; index: number; total: number }
+  | { type: 'step_start'; step: CeoStep; index: number; total: number; chatId?: string }
   | { type: 'step_done'; step: CeoStep; index: number; result: string }
   | { type: 'step_error'; step: CeoStep; index: number; error: string }
   | { type: 'done'; summary: string };
@@ -28,6 +29,8 @@ export interface KodaStepState {
   status: 'pending' | 'running' | 'done' | 'error';
   result?: string;
   error?: string;
+  chatId?: string;
+  resolvedModel?: string;
 }
 
 export interface KodaState {
@@ -70,10 +73,56 @@ interface Props {
   workspaceId: string;
   projectRoot: string | null;
   kodaState: KodaState;
+  history: KodaHistoryEntry[];
   onRun: (task: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
   onStop: () => void;
+}
+
+// ─── History entry card ────────────────────────────────────────────────────────
+
+function HistoryCard({ entry }: { entry: KodaHistoryEntry }) {
+  const [open, setOpen] = useState(false);
+  const date = new Date(entry.timestamp);
+  const dateStr = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  const timeStr = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <div className="koda-history-card">
+      <button className="koda-history-card-header" onClick={() => setOpen(v => !v)}>
+        <span className="koda-history-card-arrow">{open ? '▾' : '▸'}</span>
+        <span className="koda-history-card-task">{entry.task}</span>
+        <span className="koda-history-card-meta">
+          {entry.complexity && (
+            <span className="koda-history-card-complexity" style={{ color: COMPLEXITY_COLOR[entry.complexity] ?? 'var(--text-dim)' }}>
+              {entry.complexity}
+            </span>
+          )}
+          <span className="koda-history-card-date">{dateStr} {timeStr}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="koda-history-card-body">
+          <div className="koda-history-steps">
+            {entry.steps.map((s, i) => (
+              <div key={i} className={`koda-history-step ${s.error ? 'error' : 'done'}`}>
+                <div className="koda-history-step-header">
+                  <span className="koda-step-icon">{s.error ? '✕' : '✓'}</span>
+                  <span className="koda-step-agent" style={{ color: agentColor(s.agent) }}>[{s.agent}]</span>
+                  <span className="koda-step-desc">{s.description}</span>
+                </div>
+                {s.error && <div className="koda-step-error">{s.error}</div>}
+              </div>
+            ))}
+          </div>
+          {entry.summary && (
+            <pre className="koda-history-summary">{entry.summary}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Agent colors ──────────────────────────────────────────────────────────────
@@ -89,6 +138,14 @@ const AGENT_ICON: Record<string, string> = {
 
 function agentColor(n: string) { return AGENT_COLOR[n] ?? '#e3b341'; }
 function agentIcon(n: string)  { return AGENT_ICON[n]  ?? '•'; }
+
+/** Extracts the ## Achados block from agent result text, or returns null. */
+function extractAchados(result: string): string | null {
+  const match = result.match(/##\s*Achados[\s\S]+/i);
+  if (!match) return null;
+  const text = match[0].trim();
+  return text.length > 600 ? text.slice(0, 600).trimEnd() + '…' : text;
+}
 
 const COMPLEXITY_COLOR: Record<string, string> = {
   simple: '#3fb950', moderate: '#e3b341', complex: '#f85149',
@@ -170,7 +227,7 @@ function useVoiceFlow(deps: {
 
   // ── Record + silence detect + Whisper ─────────────────────────────────────
 
-  const recordUntilSilence = useCallback(async (): Promise<string | null> => {
+  const recordUntilSilence = useCallback(async (silenceMs = 800, onStopped?: () => void): Promise<string | null> => {
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -194,7 +251,10 @@ function useVoiceFlow(deps: {
           audioCtxRef.current.close().catch(() => {});
           audioCtxRef.current = null;
         }
-        if (chunks.length === 0) { resolve(null); return; }
+        // If phase is 'off' the recorder was stopped externally — discard audio
+        if (chunks.length === 0 || getPhase() === 'off') { resolve(null); return; }
+
+        onStopped?.();
 
         // Transcribe via Whisper
         const blob  = new Blob(chunks, { type: 'audio/webm' });
@@ -230,8 +290,8 @@ function useVoiceFlow(deps: {
         if (avg > 15) { lastSound = Date.now(); speakingBegan = true; }
         const silence = Date.now() - lastSound;
 
-        if (speakingBegan  && silence > 2000) { recorder.stop(); return; }
-        if (!speakingBegan && silence > 8000) { recorder.stop(); return; }
+        if (speakingBegan  && silence > silenceMs) { recorder.stop(); return; }
+        if (!speakingBegan && silence > 6000)      { recorder.stop(); return; }
 
         rafRef.current = requestAnimationFrame(tick);
       };
@@ -245,10 +305,11 @@ function useVoiceFlow(deps: {
 
   const listenForTask = useCallback(async () => {
     if (getPhase() !== 'listening') return;
-    const text = await recordUntilSilence();
+    const text = await recordUntilSilence(800, () => setPhase('transcribing'));
     if (getPhase() === 'off') return;
 
     if (!text || text.length < 3) {
+      setPhase('listening');
       await playTTS('Não entendi. Pode repetir?');
       if (getPhase() === 'listening') listenForTask();
       return;
@@ -263,25 +324,42 @@ function useVoiceFlow(deps: {
 
   const listenForConfirm = useCallback(async () => {
     if (getPhase() !== 'confirming') return;
-    const text = await recordUntilSilence();
-    if (getPhase() === 'off') return;
 
-    const t     = (text || '').toLowerCase();
-    const isYes = /\b(sim|s|pode|confirma|ok|vai|certo|tá|ta|isso)\b/.test(t);
-    const isNo  = /\b(não|nao|n|cancela|para|errado|muda|outro|volta)\b/.test(t);
+    // Keep 'confirming' phase visible during transcription so UI buttons stay hidden.
+    // Only switch to 'transcribing' when speech was detected (not external stop).
+    const text = await recordUntilSilence(600, () => {
+      if (getPhase() !== 'off') setPhase('transcribing');
+    });
+
+    // Abort if the flow was externally interrupted
+    const p = getPhase();
+    if (p === 'off' || p === 'executing' || p === 'listening' || p === 'waiting_plan') return;
+
+    // No audio captured (timeout with no speech) — retry silently
+    if (!text) {
+      setPhase('confirming');
+      if (getPhase() === 'confirming') listenForConfirm();
+      return;
+    }
+
+    // Normalize accents so "não"/"Não"/"nao" all match after NFD decomposition
+    const t = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    const isYes = /\b(sim|pode|confirma|confirmar|ok|vai|certo|ta|isso|execute|executar)\b/.test(t);
+    const isNo  = /\b(nao|cancela|cancelar|para|parar|errado|muda|mudar|outro|volta|voltar)\b/.test(t);
 
     if (isYes) {
       setPhase('executing');
       depsRef.current.onConfirm();
     } else if (isNo) {
+      // Set phase before onCancel so koda-state change doesn't trigger unexpected effects
+      setPhase('listening');
+      setLiveText('');
       depsRef.current.onCancel();
       await playTTS('Ok, cancelado. O que você quer fazer?');
-      if (getPhase() !== 'off') {
-        setLiveText('');
-        setPhase('listening');
-        listenForTask();
-      }
+      if (getPhase() === 'listening') listenForTask();
     } else {
+      setPhase('confirming');
       await playTTS('Não entendi. Diga sim para confirmar ou não para cancelar.');
       if (getPhase() === 'confirming') listenForConfirm();
     }
@@ -290,7 +368,12 @@ function useVoiceFlow(deps: {
   // ── Wake word ("KODA") via SpeechRecognition — zero audio capture ──────────
 
   const listenForWakeWord = useCallback(() => {
-    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    // webkitSpeechRecognition is available in Electron/Chromium but routes audio to
+    // Google's cloud via Chromium's internal network stack (bypasses all JS interceptors),
+    // causing repeated chunked-upload failures (net::ERR_FAILED -2) in the network service.
+    // In Electron we use Whisper directly via recordUntilSilence instead.
+    const isElectron = navigator.userAgent.includes('Electron');
+    const SR = isElectron ? null : ((window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition);
     if (!SR) {
       setPhase('listening');
       listenForTask();
@@ -451,12 +534,13 @@ const VOICE_COLOR: Partial<Record<VoicePhase, string>> = {
 
 // ─── KodaPanel ─────────────────────────────────────────────────────────────────
 
-export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, onConfirm, onCancel, onStop }: Props) {
-  const [task, setTask]           = useState('');
-  const [activeTab, setActiveTab] = useState<string | null>(null);
-  const textareaRef  = useRef<HTMLTextAreaElement>(null);
-  const bodyRef      = useRef<HTMLDivElement>(null);
-  const prevSumRef   = useRef<string | null>(null);
+export default function KodaPanel({ workspaceId: _workspaceId, projectRoot, kodaState, history, onRun, onConfirm, onCancel, onStop }: Props) {
+  const [task, setTask]             = useState('');
+  const [activeTab, setActiveTab]   = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const textareaRef      = useRef<HTMLTextAreaElement>(null);
+  const bodyRef          = useRef<HTMLDivElement>(null);
+  const prevRunningTTS   = useRef(false);
 
   const { running, planning, confirming, plan, steps, summary, error } = kodaState;
 
@@ -481,13 +565,14 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
   }, [steps.length, summary]);
 
-  // TTS summary in manual mode
+  // TTS summary in manual mode — dispara apenas quando running vai de true→false
   useEffect(() => {
-    if (summary && summary !== prevSumRef.current && !voiceActive) {
-      prevSumRef.current = summary;
+    const was = prevRunningTTS.current;
+    prevRunningTTS.current = running;
+    if (was && !running && summary && !voiceActive) {
       playTTS(summary);
     }
-  }, [summary, voiceActive]);
+  }, [running, summary, voiceActive]);
 
   // Default active tab
   useEffect(() => {
@@ -520,7 +605,8 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
   const doneCount  = steps.filter(s => s.status === 'done').length;
   const totalSteps = plan?.steps.length ?? 0;
 
-  const isVoiceConfirming = voicePhase === 'confirming';
+  // Hide manual confirm/cancel buttons during both 'confirming' and 'transcribing' phases
+  const isVoiceConfirming = voicePhase === 'confirming' || voicePhase === 'transcribing';
 
   return (
     <div className="koda-panel">
@@ -528,19 +614,28 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
       {/* ── Header ── */}
       <div className="koda-header">
         <span className="koda-logo">KODA</span>
-        {plan && (
+        {!showHistory && plan && (
           <span className="koda-complexity" style={{ color: COMPLEXITY_COLOR[plan.complexity ?? 'moderate'] }}>
             {plan.complexity ?? 'moderate'}
           </span>
         )}
-        {voiceActive && (
+        {voiceActive && !showHistory && (
           <span className="koda-voice-status" style={{ color: VOICE_COLOR[voicePhase] ?? 'var(--text-dim)' }}>
             <span className={`koda-voice-dot ${voicePhase === 'listening' ? 'pulsing' : ''}`} />
             {VOICE_LABEL[voicePhase]}
           </span>
         )}
         <div className="koda-header-right">
-          {confirming && !isVoiceConfirming && (
+          {!running && !confirming && (
+            <button
+              className={`koda-history-btn ${showHistory ? 'active' : ''}`}
+              onClick={() => setShowHistory(v => !v)}
+              title="Histórico de execuções"
+            >
+              {showHistory ? '← Voltar' : `⏱ Histórico${history.length ? ` (${history.length})` : ''}`}
+            </button>
+          )}
+          {!showHistory && confirming && !isVoiceConfirming && (
             <>
               <button className="koda-confirm-btn" onClick={onConfirm} title="Executar este plano">
                 ▶ Executar
@@ -550,7 +645,7 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
               </button>
             </>
           )}
-          {running && (
+          {!showHistory && running && (
             <button className="koda-stop-btn" onClick={onStop} title="Parar CEO">
               ■ Parar
             </button>
@@ -561,8 +656,22 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
       {/* ── Body ── */}
       <div className="koda-body" ref={bodyRef}>
 
+        {/* ── History view ── */}
+        {showHistory && (
+          <div className="koda-history">
+            {history.length === 0 ? (
+              <div className="koda-empty">
+                <div className="koda-empty-title">Sem histórico</div>
+                <div className="koda-empty-sub">As execuções do CEO aparecerão aqui.</div>
+              </div>
+            ) : (
+              history.map(entry => <HistoryCard key={entry.id} entry={entry} />)
+            )}
+          </div>
+        )}
+
         {/* Voice: wake word */}
-        {voicePhase === 'wake_word' && (
+        {!showHistory && voicePhase === 'wake_word' && (
           <div className="koda-voice-listening">
             <div className="koda-orb koda-orb--wake" />
             <div className="koda-voice-listening-label">Diga <strong>KODA</strong> para começar</div>
@@ -570,7 +679,7 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
         )}
 
         {/* Voice: listening */}
-        {voicePhase === 'listening' && !planning && !plan && !summary && (
+        {!showHistory && voicePhase === 'listening' && !planning && !plan && !summary && (
           <div className="koda-voice-listening">
             <div className="koda-orb koda-orb--listening" style={{ '--level': audioLevel } as any} />
             <div className="koda-voice-listening-label">Ouvindo sua tarefa...</div>
@@ -579,7 +688,7 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
         )}
 
         {/* Voice: waiting for plan */}
-        {voicePhase === 'waiting_plan' && !plan && (
+        {!showHistory && voicePhase === 'waiting_plan' && !plan && (
           <div className="koda-voice-listening">
             <div className="koda-orb koda-orb--processing" />
             <div className="koda-voice-listening-label">Gerando plano...</div>
@@ -588,7 +697,7 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
         )}
 
         {/* Empty state (no voice) */}
-        {!voiceActive && !running && !plan && !summary && !error && (
+        {!showHistory && !voiceActive && !running && !plan && !summary && !error && (
           <div className="koda-empty">
             <button
               className="koda-empty-orb"
@@ -606,31 +715,36 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
         )}
 
         {/* Planning spinner */}
-        {planning && (
+        {!showHistory && planning && (
           <div className="koda-planning">
             <span className="koda-spinner" /> Planejando...
           </div>
         )}
 
-        {/* Confirmation banner */}
-        {confirming && plan && (
+        {/* Confirmation banner — shows CEO's interpretation BEFORE executing */}
+        {!showHistory && confirming && plan && (
           <div className={`koda-confirm-banner${isVoiceConfirming ? ' koda-confirm-banner--voice' : ''}`}>
-            <span className="koda-confirm-icon">📋</span>
-            <span>
-              <strong>{plan.steps.length} passo{plan.steps.length !== 1 ? 's' : ''}</strong> planejado{plan.steps.length !== 1 ? 's' : ''}
-              {plan.complexity && <> · <span style={{ color: COMPLEXITY_COLOR[plan.complexity] }}>{plan.complexity}</span></>}
-              {' '}— {isVoiceConfirming
+            <div className="koda-confirm-banner-top">
+              <span className="koda-confirm-icon">📋</span>
+              <span className="koda-confirm-meta">
+                <strong>{plan.steps.length} passo{plan.steps.length !== 1 ? 's' : ''}</strong>
+                {plan.complexity && <> · <span style={{ color: COMPLEXITY_COLOR[plan.complexity] }}>{plan.complexity}</span></>}
+              </span>
+              {isVoiceConfirming
                 ? <span className="koda-voice-prompt">🎙 Diga <strong>sim</strong> ou <strong>não</strong></span>
-                : 'revise e confirme para executar.'}
-            </span>
+                : <span className="koda-confirm-hint">Confira o plano abaixo e clique em Executar.</span>}
+            </div>
+            {plan.thinking && (
+              <div className="koda-confirm-thinking">
+                <span className="koda-confirm-thinking-label">Entendi assim:</span> {plan.thinking}
+              </div>
+            )}
           </div>
         )}
 
         {/* Plan + steps */}
-        {plan && plan.steps.length > 0 && (
+        {!showHistory && plan && plan.steps.length > 0 && (
           <>
-            {plan.thinking && <div className="koda-thinking">{plan.thinking}</div>}
-
             <div className="koda-progress-bar-wrap">
               <div className="koda-progress-bar" style={{ width: `${totalSteps ? (doneCount / totalSteps) * 100 : 0}%` }} />
             </div>
@@ -663,10 +777,15 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
                       [{s.step.agent}]
                     </span>
                     <span className="koda-step-tool">{s.step.tool}</span>
+                    {s.resolvedModel && (
+                      <span className="koda-step-model" title="Modelo usado neste passo">
+                        {s.resolvedModel}
+                      </span>
+                    )}
                   </div>
                   <div className="koda-step-desc">{s.step.description}</div>
-                  {s.status === 'done' && s.result && s.result.length < 400 && (
-                    <div className="koda-step-result">{s.result}</div>
+                  {s.status === 'done' && s.result && (
+                    <div className="koda-step-result">{extractAchados(s.result) || s.result.slice(-300).trim()}</div>
                   )}
                   {s.status === 'error' && <div className="koda-step-error">{s.error}</div>}
                 </div>
@@ -687,10 +806,36 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
         )}
 
         {/* Summary */}
-        {summary && !running && (
+        {!showHistory && summary && !running && (
           <div className="koda-summary">
-            <div className="koda-summary-label">Resumo</div>
-            <pre className="koda-summary-text">{summary}</pre>
+            <div className="koda-summary-header">
+              <span className="koda-summary-label">Resumo</span>
+              <button className="koda-new-task-btn" onClick={onCancel} title="Iniciar nova tarefa">
+                + Nova tarefa
+              </button>
+            </div>
+            <div className="koda-summary-steps">
+              {steps.map((s, i) => (
+                <div key={i} className={`koda-summary-step koda-summary-step--${s.status}`}>
+                  <div className="koda-summary-step-row">
+                    <span className="koda-summary-step-icon">{s.status === 'error' ? '✕' : '✓'}</span>
+                    <span className="koda-summary-step-agent" style={{ color: agentColor(s.step.agent) }}>
+                      [{s.step.agent}]
+                    </span>
+                    <span className="koda-summary-step-desc">{s.step.description}</span>
+                    {s.resolvedModel && (
+                      <span className="koda-summary-step-model">{s.resolvedModel}</span>
+                    )}
+                  </div>
+                  {s.error && <div className="koda-summary-step-error">{s.error}</div>}
+                  {!s.error && s.result && (
+                    <div className="koda-summary-step-result">
+                      {extractAchados(s.result) || s.result.slice(-300).trim()}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
             {voiceActive && (
               <div className="koda-voice-done-hint">🎙 Pronto para nova tarefa — ouvindo...</div>
             )}
@@ -698,8 +843,8 @@ export default function KodaPanel({ workspaceId, projectRoot, kodaState, onRun, 
         )}
 
         {/* Errors */}
-        {error      && <div className="koda-error">{error}</div>}
-        {voiceError && <div className="koda-error">{voiceError}</div>}
+        {!showHistory && error      && <div className="koda-error">{error}</div>}
+        {!showHistory && voiceError && <div className="koda-error">{voiceError}</div>}
       </div>
 
       {/* ── Input (manual, shown when voice is off) ── */}

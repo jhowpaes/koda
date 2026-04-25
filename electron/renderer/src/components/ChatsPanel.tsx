@@ -160,10 +160,14 @@ function renderContent(text: string) {
           const rawImg = detectBase64Image(trimmed);
           if (rawImg) return <img key={j} src={rawImg} alt="image" className="msg-image" />;
 
+          if (line.startsWith('# '))   return <h1 key={j}>{line.slice(2)}</h1>;
           if (line.startsWith('## '))  return <h2 key={j}>{line.slice(3)}</h2>;
           if (line.startsWith('### ')) return <h3 key={j}>{line.slice(4)}</h3>;
-          if (line.startsWith('- ') || line.startsWith('* '))
-            return <li key={j} dangerouslySetInnerHTML={{ __html: fmt(line.slice(2)) }} />;
+          if (line.startsWith('#### ')) return <h4 key={j}>{line.slice(5)}</h4>;
+          if (line.startsWith('- ') || line.startsWith('* ') || line.startsWith('• '))
+            return <li key={j} dangerouslySetInnerHTML={{ __html: fmt(line.replace(/^[-*•] /, '')) }} />;
+          if (/^\d+\. /.test(line))
+            return <li key={j} dangerouslySetInnerHTML={{ __html: fmt(line.replace(/^\d+\. /, '')) }} />;
           if (trimmed === '') return j === 0 ? null : <br key={j} />;
           return <p key={j} dangerouslySetInnerHTML={{ __html: fmt(line) }} />;
         })}

@@ -103,15 +103,17 @@ const server = createMCPServer('koda-code-agent', '1.0.0', [
       inputSchema: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'The question to ask' },
+          query:   { type: 'string', description: 'The question to ask' },
+          context: { type: 'string', description: 'Results from previous steps (injected automatically by CEO)' },
         },
         required: ['query'],
       },
     },
-    handler: async ({ query }) => {
+    handler: async ({ query, context }) => {
       const q = String(query);
-      const context = buildContext(q, config.contextBudget);
-      const content = context ? `${q}\n\nRelevant code:\n${context}` : q;
+      const codeCtx = buildContext(q, config.contextBudget);
+      let content = codeCtx ? `${q}\n\nRelevant code:\n${codeCtx}` : q;
+      if (context) content += `\n\n--- Contexto dos passos anteriores ---\n${context}`;
       return agent.callWithSystemPromptSilent(buildSystemPrompt(BASE_PROMPT), content);
     },
   },
@@ -123,16 +125,20 @@ const server = createMCPServer('koda-code-agent', '1.0.0', [
       inputSchema: {
         type: 'object',
         properties: {
-          file: { type: 'string', description: 'Relative path to the file from project root' },
+          file:        { type: 'string', description: 'Relative path to the file from project root' },
           instruction: { type: 'string', description: 'What to change in the file' },
+          context:     { type: 'string', description: 'Results from previous steps (injected automatically by CEO)' },
         },
         required: ['file', 'instruction'],
       },
     },
-    handler: async ({ file, instruction }) => {
+    handler: async ({ file, instruction, context }) => {
       const filePath = resolveFile(String(file));
       if (!fs.existsSync(filePath)) return `Arquivo não encontrado: ${file}`;
-      const response = await agent.editSilent(filePath, String(instruction));
+      const inst = context
+        ? `${String(instruction)}\n\n--- Contexto dos passos anteriores ---\n${context}`
+        : String(instruction);
+      const response = await agent.editSilent(filePath, inst);
       const newContent = extractCodeBlock(response);
       if (!newContent) return 'Não foi possível extrair o conteúdo do arquivo da resposta do LLM.';
       fs.writeFileSync(filePath, newContent, 'utf-8');
@@ -187,18 +193,23 @@ const server = createMCPServer('koda-code-agent', '1.0.0', [
       inputSchema: {
         type: 'object',
         properties: {
-          task: { type: 'string', description: 'The coding task to execute in natural language' },
+          task:    { type: 'string', description: 'The coding task to execute in natural language' },
+          context: { type: 'string', description: 'Results from previous steps (injected automatically by CEO)' },
         },
         required: ['task'],
       },
     },
-    handler: async ({ task }) => {
+    handler: async ({ task, context }) => {
       const t = String(task);
       log(`run_task: ${t}`);
 
+      const taskWithContext = context
+        ? `${t}\n\n--- Contexto dos passos anteriores (use para encontrar arquivos e entender o problema) ---\n${context}`
+        : t;
+
       const planRaw = await agent.callWithSystemPromptSilent(
         PLAN_PROMPT,
-        `Task: ${t}\n\nCurrent directory: ${projectRoot()}`
+        `Task: ${taskWithContext}\n\nCurrent directory: ${projectRoot()}`
       );
 
       const steps = parsePlan(planRaw);
