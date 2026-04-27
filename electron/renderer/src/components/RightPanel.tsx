@@ -12,9 +12,10 @@ interface Props {
   onOpenProject: () => void;
   onSelectFile: (filePath: string) => void;
   onCloseTab: (filePath: string) => void;
+  onReloadTree: (root?: string | null) => void;
 }
 
-export default function RightPanel({ workspace, onFileAction, onOpenProject, onSelectFile, onCloseTab }: Props) {
+export default function RightPanel({ workspace, onFileAction, onOpenProject, onSelectFile, onCloseTab, onReloadTree }: Props) {
   const [tab, setTab] = useState<Tab>('editor');
   // Track which tabs have been opened at least once — keeps them mounted after first visit
   const [mounted, setMounted] = useState<Set<Tab>>(new Set(['editor']));
@@ -46,6 +47,7 @@ export default function RightPanel({ workspace, onFileAction, onOpenProject, onS
               onOpenProject={onOpenProject}
               onSelectFile={onSelectFile}
               onCloseTab={onCloseTab}
+              onReloadTree={onReloadTree}
             />
           </div>
         )}

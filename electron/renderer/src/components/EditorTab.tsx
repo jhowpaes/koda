@@ -90,23 +90,65 @@ function getLanguageName(filename: string) {
 
 // ── file tree ─────────────────────────────────────────────────────────────────
 
+const GIT_COLORS: Record<string, string> = {
+  M: '#e5c07b',
+  A: '#4ec9b0',
+  D: '#f44747',
+  R: '#c678dd',
+  '?': '#858585',
+};
+
+function gitColor(xy: string): string | null {
+  const s = xy.trim();
+  if (s === '??') return GIT_COLORS['?'];
+  const ch = s[0] !== ' ' ? s[0] : s[1];
+  return GIT_COLORS[ch] ?? null;
+}
+
 interface TreeNodeProps {
   node: FileNode;
   depth: number;
   selectedPath: string | null;
   modifiedPaths: Set<string>;
+  gitStatusMap: Map<string, string>;
   onSelect: (path: string) => void;
+  onRename: (oldPath: string, newName: string) => void;
 }
 
-const TreeNode = memo(function TreeNode({ node, depth, selectedPath, modifiedPaths, onSelect }: TreeNodeProps) {
+const TreeNode = memo(function TreeNode({ node, depth, selectedPath, modifiedPaths, gitStatusMap, onSelect, onRename }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(depth < 1);
+  const [renaming, setRenaming] = useState(false);
+  const [renameVal, setRenameVal] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
   const isSelected = selectedPath === node.path;
   const isModified = node.type === 'file' && modifiedPaths.has(node.path);
+  const gitXy = gitStatusMap.get(node.path);
+  const nameColor = gitXy ? gitColor(gitXy) : null;
 
   const handleClick = useCallback(() => {
+    if (renaming) return;
     if (node.type === 'dir') setExpanded(e => !e);
     else onSelect(node.path);
-  }, [node.type, node.path, onSelect]);
+  }, [renaming, node.type, node.path, onSelect]);
+
+  const startRename = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenameVal(node.name);
+    setRenaming(true);
+    setTimeout(() => renameInputRef.current?.select(), 0);
+  }, [node.name]);
+
+  const commitRename = useCallback(() => {
+    const trimmed = renameVal.trim();
+    if (trimmed && trimmed !== node.name) onRename(node.path, trimmed);
+    setRenaming(false);
+  }, [renameVal, node.name, node.path, onRename]);
+
+  const handleRenameKey = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') commitRename();
+    else if (e.key === 'Escape') setRenaming(false);
+  }, [commitRename]);
 
   return (
     <div>
@@ -130,8 +172,27 @@ const TreeNode = memo(function TreeNode({ node, depth, selectedPath, modifiedPat
             );
           })()
         )}
-        <span className={`tree-name ${node.type}`}>{node.name}</span>
-        {isModified && <span className="tree-modified-dot" title="Unsaved changes" />}
+        {renaming ? (
+          <input
+            ref={renameInputRef}
+            className="tree-rename-input"
+            value={renameVal}
+            onChange={e => setRenameVal(e.target.value)}
+            onKeyDown={handleRenameKey}
+            onBlur={() => setRenaming(false)}
+            onClick={e => e.stopPropagation()}
+            autoFocus
+          />
+        ) : (
+          <>
+            <span
+              className={`tree-name ${node.type}`}
+              style={nameColor ? { color: nameColor } : undefined}
+              onDoubleClick={startRename}
+            >{node.name}</span>
+            {isModified && <span className="tree-modified-dot" title="Unsaved changes" />}
+          </>
+        )}
       </div>
       {node.type === 'dir' && expanded && node.children?.map(child => (
         <TreeNode
@@ -140,7 +201,9 @@ const TreeNode = memo(function TreeNode({ node, depth, selectedPath, modifiedPat
           depth={depth + 1}
           selectedPath={selectedPath}
           modifiedPaths={modifiedPaths}
+          gitStatusMap={gitStatusMap}
           onSelect={onSelect}
+          onRename={onRename}
         />
       ))}
     </div>
@@ -163,13 +226,16 @@ interface Props {
   onOpenProject: () => void;
   onSelectFile: (filePath: string) => void;
   onCloseTab: (filePath: string) => void;
+  onReloadTree: (root?: string | null) => void;
 }
 
-export default memo(function EditorTab({ workspace, onFileAction, onOpenProject, onSelectFile, onCloseTab }: Props) {
+export default memo(function EditorTab({ workspace, onFileAction, onOpenProject, onSelectFile, onCloseTab, onReloadTree }: Props) {
   // Content cache: path → TabData
   const [tabMap, setTabMap] = useState<Map<string, TabData>>(() => new Map());
   // Image cache: path → data URI
   const [imageMap, setImageMap] = useState<Map<string, string>>(() => new Map());
+  // Git status: absolute path → xy status code
+  const [gitStatusMap, setGitStatusMap] = useState<Map<string, string>>(() => new Map());
   const loadingRef = useRef<Set<string>>(new Set());
   const wsIdRef = useRef<string | null>(null);
 
@@ -184,6 +250,17 @@ export default memo(function EditorTab({ workspace, onFileAction, onOpenProject,
     setImageMap(new Map());
     loadingRef.current.clear();
   }, [workspace?.id]);
+
+  // Fetch git status for file tree colors
+  useEffect(() => {
+    const root = workspace?.projectRoot;
+    if (!root) return;
+    window.api.gitStatus(root).then(files => {
+      const map = new Map<string, string>();
+      files.forEach(f => map.set(`${root}/${f.path}`, f.xy));
+      setGitStatusMap(map);
+    }).catch(() => {});
+  }, [workspace?.projectRoot, workspace?.files]);
 
   // Load file content whenever a new path is activated
   useEffect(() => {
@@ -252,6 +329,13 @@ export default memo(function EditorTab({ workspace, onFileAction, onOpenProject,
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [handleSave]);
 
+  const handleRename = useCallback(async (oldPath: string, newName: string) => {
+    const dir = oldPath.split('/').slice(0, -1).join('/');
+    const newPath = `${dir}/${newName}`;
+    await window.api.renameFile(oldPath, newPath);
+    onReloadTree();
+  }, [onReloadTree]);
+
   const handleCloseTab = useCallback((e: React.MouseEvent, path: string) => {
     e.stopPropagation();
     setTabMap(prev => { const next = new Map(prev); next.delete(path); return next; });
@@ -274,18 +358,26 @@ export default memo(function EditorTab({ workspace, onFileAction, onOpenProject,
             <button className="open-btn" onClick={onOpenProject}>Open folder…</button>
           </div>
         ) : (
-          <div className="file-tree">
-            {workspace.files.map(node => (
-              <TreeNode
-                key={node.path}
-                node={node}
-                depth={0}
-                selectedPath={selectedPath}
-                modifiedPaths={modifiedPaths}
-                onSelect={onSelectFile}
-              />
-            ))}
-          </div>
+          <>
+            <div className="file-tree-header">
+              <span className="file-tree-title">{workspace.projectRoot.split('/').pop()}</span>
+              <button className="file-tree-refresh-btn" onClick={() => onReloadTree()} title="Refresh">↺</button>
+            </div>
+            <div className="file-tree">
+              {workspace.files.map(node => (
+                <TreeNode
+                  key={node.path}
+                  node={node}
+                  depth={0}
+                  selectedPath={selectedPath}
+                  modifiedPaths={modifiedPaths}
+                  gitStatusMap={gitStatusMap}
+                  onSelect={onSelectFile}
+                  onRename={handleRename}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 

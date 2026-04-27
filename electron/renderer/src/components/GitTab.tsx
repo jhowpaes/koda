@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { loadSettings } from './SettingsModal';
 
 interface GitFile { xy: string; path: string }
 interface LogEntry { hash: string; message: string }
@@ -32,7 +33,9 @@ export default function GitTab({ projectRoot }: Props) {
   const [files, setFiles] = useState<GitFile[]>([]);
   const [stagedPaths, setStagedPaths] = useState<Set<string>>(new Set());
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [selectedCommit, setSelectedCommit] = useState<string | null>(null);
   const [diff, setDiff] = useState('');
+  const [diffHeader, setDiffHeader] = useState('');
   const [commitMsg, setCommitMsg] = useState('');
   const [log, setLog] = useState<LogEntry[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -41,6 +44,21 @@ export default function GitTab({ projectRoot }: Props) {
 
   useEffect(() => {
     if (projectRoot) refresh();
+  }, [projectRoot]);
+
+  // Auto-refresh git status every 5s
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (!projectRoot) return;
+    refreshTimerRef.current = setInterval(() => {
+      window.api.gitStatus(projectRoot).then(s => {
+        setFiles(s);
+        const staged = new Set<string>();
+        s.forEach(f => { if (f.xy[0] !== ' ' && f.xy[0] !== '?') staged.add(f.path); });
+        setStagedPaths(staged);
+      }).catch(() => {});
+    }, 5000);
+    return () => { if (refreshTimerRef.current) clearInterval(refreshTimerRef.current); };
   }, [projectRoot]);
 
   function showToast(msg: string) {
@@ -69,8 +87,30 @@ export default function GitTab({ projectRoot }: Props) {
   async function showFileDiff(filePath: string) {
     if (!projectRoot) return;
     setSelectedFile(filePath);
+    setSelectedCommit(null);
     const d = await window.api.gitFileDiff(projectRoot, filePath, stagedPaths.has(filePath));
+    setDiffHeader(filePath);
     setDiff(d || '(no diff)');
+  }
+
+  async function showCommitDiff(entry: LogEntry) {
+    if (!projectRoot) return;
+    setSelectedCommit(entry.hash);
+    setSelectedFile(null);
+    const d = await window.api.gitCommitDiff(projectRoot, entry.hash);
+    setDiffHeader(`${entry.hash}  ${entry.message}`);
+    setDiff(d || '(no diff)');
+  }
+
+  async function discard(filePath: string) {
+    if (!projectRoot) return;
+    const res = await window.api.gitDiscard(projectRoot, filePath);
+    if (res.ok) {
+      if (selectedFile === filePath) { setSelectedFile(null); setDiff(''); setDiffHeader(''); }
+      await refresh();
+    } else {
+      showToast(`Error: ${res.error}`);
+    }
   }
 
   async function toggleStage(filePath: string) {
@@ -87,10 +127,24 @@ export default function GitTab({ projectRoot }: Props) {
   async function generateMsg() {
     if (!projectRoot) return;
     setGenLoading(true);
-    const d = await window.api.gitDiff(projectRoot);
-    const msg = await window.api.generateCommit(projectRoot, d);
-    setCommitMsg(msg.trim());
-    setGenLoading(false);
+    try {
+      const settings = loadSettings();
+      const provider = settings.providers.find(p => p.enabled && p.apiKey);
+      if (!provider) { showToast('No provider configured. Go to Settings → Providers.'); return; }
+      const model = provider.models.split(',')[0].trim();
+      const d = await window.api.gitDiff(projectRoot);
+      const res = await window.api.generateCommit(projectRoot, d, {
+        apiKey: provider.apiKey,
+        baseUrl: provider.baseUrl ?? '',
+        model,
+      });
+      if (res.error) showToast(`Error: ${res.error}`);
+      else setCommitMsg(res.message ?? '');
+    } catch (e) {
+      showToast(`Error: ${(e as Error).message}`);
+    } finally {
+      setGenLoading(false);
+    }
   }
 
   async function commit() {
@@ -163,7 +217,10 @@ export default function GitTab({ projectRoot }: Props) {
       <div className="git-body">
         {/* left column */}
         <div className="git-left">
-          <div className="git-section-label">Changes ({files.length})</div>
+          <div className="git-section-label">
+            Changes ({files.length})
+            <button className="git-refresh-btn" onClick={refresh} title="Refresh">↺</button>
+          </div>
           <div className="git-files">
             {files.length === 0 && <div className="git-empty">No changes</div>}
             {files.map(f => (
@@ -183,6 +240,11 @@ export default function GitTab({ projectRoot }: Props) {
                   {statusLabel(f.xy)}
                 </span>
                 <span className="git-file-path" title={f.path}>{f.path}</span>
+                <button
+                  className="git-discard-btn"
+                  title="Discard changes"
+                  onClick={e => { e.stopPropagation(); discard(f.path); }}
+                >↩</button>
               </div>
             ))}
           </div>
@@ -207,7 +269,12 @@ export default function GitTab({ projectRoot }: Props) {
           <div className="git-section-label">Recent commits</div>
           <div className="git-log">
             {log.map(e => (
-              <div key={e.hash} className="git-log-entry">
+              <div
+                key={e.hash}
+                className={`git-log-entry ${selectedCommit === e.hash ? 'selected' : ''}`}
+                onClick={() => showCommitDiff(e)}
+                title="Click to see changes"
+              >
                 <span className="git-log-hash">{e.hash}</span>
                 <span className="git-log-msg">{e.message}</span>
               </div>
@@ -217,9 +284,9 @@ export default function GitTab({ projectRoot }: Props) {
 
         {/* right column — diff viewer */}
         <div className="git-right">
-          {selectedFile && diff ? (
+          {(selectedFile || selectedCommit) && diff ? (
             <>
-              <div className="git-diff-header">{selectedFile}</div>
+              <div className="git-diff-header">{diffHeader}</div>
               <div className="git-diff-content">
                 {diff.split('\n').map((line, i) => {
                   const cls = line.startsWith('+') && !line.startsWith('+++')

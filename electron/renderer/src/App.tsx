@@ -103,6 +103,10 @@ declare global {
       };
       openProject: () => Promise<string | null>;
       getFileTree: (dir: string) => Promise<FileNode[]>;
+      renameFile: (oldPath: string, newPath: string) => Promise<{ ok?: boolean; error?: string }>;
+      watchProject: (root: string) => Promise<void>;
+      unwatchProject: (root: string) => Promise<void>;
+      onFilesChanged: (cb: (root: string) => void) => void;
       readFile: (path: string) => Promise<string | null>;
       readFileBinary: (path: string) => Promise<string | null>;
       writeFile: (path: string, content: string) => Promise<{ ok?: boolean; error?: string }>;
@@ -128,13 +132,15 @@ declare global {
       }>;
       applyEdit: (path: string, content: string) => Promise<{ ok?: boolean; error?: string }>;
       gitDiff: (root: string) => Promise<string>;
-      generateCommit: (root: string, diff: string) => Promise<string>;
+      generateCommit: (root: string, diff: string, cfg: { apiKey: string; baseUrl: string; model: string }) => Promise<{ message?: string; error?: string }>;
       gitCommit: (root: string, msg: string) => Promise<{ ok?: boolean; error?: string }>;
       gitStatus: (root: string) => Promise<Array<{ xy: string; path: string }>>;
       gitFileDiff: (root: string, filePath: string, staged: boolean) => Promise<string>;
       gitStage: (root: string, filePath: string) => Promise<{ ok?: boolean; error?: string }>;
       gitUnstage: (root: string, filePath: string) => Promise<{ ok?: boolean; error?: string }>;
       gitLog: (root: string, limit?: number) => Promise<Array<{ hash: string; message: string }>>;
+      gitCommitDiff: (root: string, hash: string) => Promise<string>;
+      gitDiscard: (root: string, filePath: string) => Promise<{ ok?: boolean; error?: string }>;
       gitBranch: (root: string) => Promise<string>;
       gitBranches: (root: string) => Promise<Array<{ name: string; current: boolean }>>;
       gitCheckout: (root: string, branch: string) => Promise<{ ok?: boolean; error?: string }>;
@@ -705,7 +711,20 @@ export default function App() {
         : (ws.chats.length > 0 ? ws.chats : [newChat()]);
       return { ...ws, name, projectRoot: folder, files: tree, chats };
     }));
+    window.api.watchProject(folder).catch(() => {});
   }, [activeWorkspaceId]);
+
+  const reloadFileTree = useCallback(async (root?: string | null) => {
+    const folder = root ?? workspacesRef.current.find(w => w.id === activeWorkspaceId)?.projectRoot;
+    if (!folder) return;
+    const tree = await window.api.getFileTree(folder);
+    setWorkspaces(prev => prev.map(ws => ws.projectRoot === folder ? { ...ws, files: tree } : ws));
+  }, [activeWorkspaceId]);
+
+  // Auto-refresh file tree when main process detects fs changes
+  useEffect(() => {
+    window.api.onFilesChanged((root) => { reloadFileTree(root); });
+  }, [reloadFileTree]);
 
   // ── chat ops ───────────────────────────────────────────────────────────────
 
@@ -957,6 +976,7 @@ export default function App() {
         onOpenProject={openProject}
         onSelectFile={selectFile}
         onCloseTab={closeTab}
+        onReloadTree={reloadFileTree}
       />
 
       {activeDiffChat?.pendingDiff && (

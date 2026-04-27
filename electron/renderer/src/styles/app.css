@@ -527,6 +527,27 @@ html, body, #root {
 }
 .open-btn:hover { background: var(--accent-hover); }
 
+.file-tree-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px 4px; border-bottom: 1px solid var(--border);
+  background: #1d1f24;
+}
+.file-tree-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.file-tree-refresh-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 13px; padding: 0 2px; line-height: 1; flex-shrink: 0;
+}
+.file-tree-refresh-btn:hover { color: var(--text); }
+
+.tree-rename-input {
+  flex: 1; background: var(--input-bg, #2a2d35); border: 1px solid var(--accent);
+  color: var(--text); font-size: 12px; padding: 1px 4px; border-radius: 3px;
+  outline: none; min-width: 0;
+}
+
 .file-tree { padding: 6px 0; }
 
 .tree-node {
@@ -844,7 +865,13 @@ html, body, #root {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
   color: var(--text-dim); flex-shrink: 0; border-bottom: 1px solid var(--border);
   background: var(--panel-bg);
+  display: flex; align-items: center; justify-content: space-between;
 }
+.git-refresh-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 13px; padding: 0 2px; line-height: 1;
+}
+.git-refresh-btn:hover { color: var(--text); }
 
 .git-files {
   flex: 0 1 auto; overflow-y: auto; max-height: 220px;
@@ -867,7 +894,13 @@ html, body, #root {
 .git-file-status.D { color: var(--red); }
 .git-file-status.R { color: var(--orange); }
 .git-file-status.U { color: var(--cyan); }
-.git-file-path { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-file-path { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.git-discard-btn {
+  background: none; border: none; cursor: pointer; flex-shrink: 0;
+  color: var(--text-dim); font-size: 13px; padding: 0 2px; opacity: 0; line-height: 1;
+}
+.git-file:hover .git-discard-btn { opacity: 1; }
+.git-discard-btn:hover { color: var(--red); }
 
 .git-commit-area {
   padding: 8px 10px;
@@ -907,9 +940,11 @@ html, body, #root {
 
 .git-log-entry {
   display: flex; gap: 8px; padding: 4px 10px; align-items: baseline;
-  border-bottom: 1px solid transparent;
+  border-bottom: 1px solid transparent; cursor: pointer;
 }
 .git-log-entry:hover { background: var(--hover-bg); }
+.git-log-entry.selected { background: var(--hover-bg); border-left: 2px solid var(--purple); }
+.git-log-entry.selected .git-log-hash { color: var(--accent); }
 .git-log-hash { font-family: 'Menlo', monospace; font-size: 10px; color: var(--purple); flex-shrink: 0; }
 .git-log-msg { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

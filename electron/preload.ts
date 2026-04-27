@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('api', {
   writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', { filePath, content }),
   loadChats: (projectRoot: string) => ipcRenderer.invoke('fs:loadChats', projectRoot),
   saveChats: (projectRoot: string, chats: unknown[]) => ipcRenderer.invoke('fs:saveChats', { projectRoot, chats }),
+  renameFile: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', { oldPath, newPath }),
+  watchProject: (root: string) => ipcRenderer.invoke('fs:watch', root),
+  unwatchProject: (root: string) => ipcRenderer.invoke('fs:unwatch', root),
+  onFilesChanged: (cb: (root: string) => void) => ipcRenderer.on('files:changed', (_, root) => cb(root)),
 
   // ── shell runner ───────────────────────────────────────────────────────────
   runShell: (root: string, command: string) => ipcRenderer.send('shell:run', { root, command }),
@@ -91,13 +95,16 @@ contextBridge.exposeInMainWorld('api', {
   // ── git ────────────────────────────────────────────────────────────────────
   gitDiff: (root: string) => ipcRenderer.invoke('git:diff', root),
   gitCommit: (root: string, message: string) => ipcRenderer.invoke('git:commit', { root, message }),
-  generateCommit: (root: string, diff: string) => ipcRenderer.invoke('agent:commit', { root, diff }),
+  generateCommit: (root: string, diff: string, cfg: { apiKey: string; baseUrl: string; model: string }) =>
+    ipcRenderer.invoke('agent:commit', { root, diff, ...cfg }),
   gitStatus: (root: string) => ipcRenderer.invoke('git:status', root),
   gitFileDiff: (root: string, filePath: string, staged: boolean) =>
     ipcRenderer.invoke('git:fileDiff', { root, filePath, staged }),
   gitStage: (root: string, filePath: string) => ipcRenderer.invoke('git:stage', { root, filePath }),
   gitUnstage: (root: string, filePath: string) => ipcRenderer.invoke('git:unstage', { root, filePath }),
   gitLog: (root: string, limit?: number) => ipcRenderer.invoke('git:log', { root, limit }),
+  gitCommitDiff: (root: string, hash: string) => ipcRenderer.invoke('git:commitDiff', { root, hash }),
+  gitDiscard: (root: string, filePath: string) => ipcRenderer.invoke('git:discard', { root, filePath }),
   gitBranch: (root: string) => ipcRenderer.invoke('git:branch', root),
   gitBranches: (root: string) => ipcRenderer.invoke('git:branches', root),
   gitCheckout: (root: string, branch: string) => ipcRenderer.invoke('git:checkout', { root, branch }),

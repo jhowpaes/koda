@@ -272,7 +272,23 @@ ipcMain.handle('agent:applyEdit', (_, { filePath, content }: { filePath: string;
 // ─── IPC: git ─────────────────────────────────────────────────────────────────
 
 ipcMain.handle('git:diff', (_, root: string) => {
-  try { return execSync('git diff --cached', { cwd: root, encoding: 'utf-8' }); } catch { return ''; }
+  try {
+    // All changes vs last commit (staged + unstaged tracked files)
+    let diff = '';
+    try {
+      diff = execSync('git diff HEAD', { cwd: root, encoding: 'utf-8', maxBuffer: 2 * 1024 * 1024 });
+    } catch {
+      // No commits yet — fall back to staged + unstaged separately
+      const cached = execSync('git diff --cached', { cwd: root, encoding: 'utf-8', maxBuffer: 2 * 1024 * 1024 });
+      const unstaged = execSync('git diff', { cwd: root, encoding: 'utf-8', maxBuffer: 2 * 1024 * 1024 });
+      diff = [cached, unstaged].filter(Boolean).join('\n');
+    }
+    // Append list of untracked files so the AI knows about new files
+    const status = execSync('git status --porcelain', { cwd: root, encoding: 'utf-8' });
+    const untracked = status.split('\n').filter(l => l.startsWith('??')).map(l => l.slice(3).trim());
+    if (untracked.length) diff += `\n\n# Untracked files:\n${untracked.map(f => `#   ${f}`).join('\n')}`;
+    return diff;
+  } catch { return ''; }
 });
 
 ipcMain.handle('git:commit', (_, { root, message }: { root: string; message: string }) => {
@@ -307,6 +323,13 @@ ipcMain.handle('git:unstage', (_, { root, filePath }: { root: string; filePath: 
   catch (e) { return { error: (e as Error).message }; }
 });
 
+ipcMain.handle('git:discard', (_, { root, filePath }: { root: string; filePath: string }) => {
+  try {
+    execSync(`git checkout -- "${filePath}"`, { cwd: root });
+    return { ok: true };
+  } catch (e) { return { error: (e as Error).message }; }
+});
+
 ipcMain.handle('git:log', (_, { root, limit }: { root: string; limit?: number }) => {
   try {
     const out = execSync(`git log --oneline -${limit ?? 20}`, { cwd: root, encoding: 'utf-8' });
@@ -315,6 +338,12 @@ ipcMain.handle('git:log', (_, { root, limit }: { root: string; limit?: number })
       message: line.slice(8),
     }));
   } catch { return []; }
+});
+
+ipcMain.handle('git:commitDiff', (_, { root, hash }: { root: string; hash: string }) => {
+  try {
+    return execSync(`git show ${hash}`, { cwd: root, encoding: 'utf-8', maxBuffer: 4 * 1024 * 1024 });
+  } catch { return ''; }
 });
 
 ipcMain.handle('git:branch', (_, root: string) => {
@@ -347,12 +376,41 @@ ipcMain.handle('git:pull', (_, root: string) => {
 
 // ─── IPC: commit generation ───────────────────────────────────────────────────
 
-ipcMain.handle('agent:commit', async (_, { root, diff }: { root: string; diff: string }) => {
-  const agent = await getAgent(root);
-  return agent.callWithSystemPromptSilent(
-    'You are an expert at conventional commits. Return ONLY the commit message, nothing else.',
-    `Generate a commit message:\n\n${diff.slice(0, 12000)}`
-  );
+ipcMain.handle('agent:commit', async (_, {
+  diff, apiKey, baseUrl, model,
+}: { root: string; diff: string; apiKey: string; baseUrl: string; model: string }) => {
+  try {
+    if (!apiKey) return { error: 'No API key configured. Go to Settings → Providers.' };
+    if (!diff.trim()) return { error: 'No changes detected.' };
+
+    const system = 'You are an expert at writing conventional commit messages. Return ONLY the commit message (subject line + optional body), no extra explanation.';
+    const prompt = `Generate a commit message for these changes:\n\n${diff.slice(0, 14000)}`;
+    const isAnthropic = model.startsWith('claude') || (baseUrl ?? '').includes('anthropic');
+
+    if (isAnthropic) {
+      const { default: Anthropic } = await import('@anthropic-ai/sdk');
+      const client = new Anthropic({ apiKey });
+      const res = await client.messages.create({
+        model,
+        max_tokens: 256,
+        system,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const block = res.content.find(b => b.type === 'text');
+      return { message: block && block.type === 'text' ? block.text.trim() : '' };
+    } else {
+      const { default: OpenAI } = await import('openai');
+      const client = new OpenAI({ apiKey, baseURL: baseUrl || undefined });
+      const res = await client.chat.completions.create({
+        model,
+        max_tokens: 256,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
+      });
+      return { message: res.choices[0]?.message?.content?.trim() ?? '' };
+    }
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
 });
 
 // ─── IPC: Anthropic agentic streaming ────────────────────────────────────────
@@ -1184,14 +1242,45 @@ ipcMain.handle('koda:listWorkspaces', async () => {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+ipcMain.handle('fs:rename', (_, { oldPath, newPath }: { oldPath: string; newPath: string }) => {
+  try { fs.renameSync(oldPath, newPath); return { ok: true }; }
+  catch (e) { return { error: (e as Error).message }; }
+});
+
+// ── file watcher ───────────────────────────────────────────────────────────────
+const fileWatchers = new Map<string, fs.FSWatcher>();
+const watchDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+
+ipcMain.handle('fs:watch', (event, root: string) => {
+  if (fileWatchers.has(root)) return;
+  try {
+    const watcher = fs.watch(root, { recursive: true }, () => {
+      const prev = watchDebounce.get(root);
+      if (prev) clearTimeout(prev);
+      watchDebounce.set(root, setTimeout(() => {
+        watchDebounce.delete(root);
+        event.sender.send('files:changed', root);
+      }, 600));
+    });
+    fileWatchers.set(root, watcher);
+  } catch { /* recursive watch not supported on this platform */ }
+});
+
+ipcMain.handle('fs:unwatch', (_, root: string) => {
+  fileWatchers.get(root)?.close();
+  fileWatchers.delete(root);
+  const t = watchDebounce.get(root);
+  if (t) { clearTimeout(t); watchDebounce.delete(root); }
+});
+
 interface FileNode { name: string; path: string; type: 'file' | 'dir'; children?: FileNode[] }
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '__pycache__', '.turbo', 'out']);
 
 function readTree(dir: string, depth: number): FileNode[] {
-  if (depth > 7) return [];
+  if (depth > 10) return [];
   try {
     return fs.readdirSync(dir, { withFileTypes: true })
-      .filter(e => !SKIP.has(e.name) && !e.name.startsWith('.'))
+      .filter(e => !SKIP.has(e.name))
       .sort((a, b) => (a.isDirectory() === b.isDirectory() ? a.name.localeCompare(b.name) : a.isDirectory() ? -1 : 1))
       .map(e => ({
         name: e.name,
