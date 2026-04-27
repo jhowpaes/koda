@@ -89,6 +89,11 @@ contextBridge.exposeInMainWorld('api', {
     saveHistory: (projectRoot: string, entry: unknown) => ipcRenderer.invoke('koda:saveHistory', { projectRoot, entry }),
   },
 
+  // ── cli open path ─────────────────────────────────────────────────────────
+  onOpenPath: (cb: (path: string) => void) => {
+    ipcRenderer.on('app:openPath', (_, path) => cb(path));
+  },
+
   // ── permissions ───────────────────────────────────────────────────────────
   requestMicPermission: () => ipcRenderer.invoke('permissions:microphone'),
 

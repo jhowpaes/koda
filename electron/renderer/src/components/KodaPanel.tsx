@@ -153,13 +153,44 @@ const COMPLEXITY_COLOR: Record<string, string> = {
 
 // ─── TTS ───────────────────────────────────────────────────────────────────────
 
+// Strips markdown and code artifacts so TTS receives clean spoken text.
+// Keeps only readable prose — removes headers, bullets, code blocks, line refs.
+function stripForTTS(text: string, maxChars = 480): string {
+  return text
+    .replace(/```[\s\S]*?```/g, '')            // remove fenced code blocks
+    .replace(/`[^`\n]+`/g, '')                 // remove inline code
+    .replace(/^#{1,6}\s+/gm, '')               // remove markdown headers
+    .replace(/\[L\d+\]/g, '')                  // remove line refs [L123]
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')       // unbold
+    .replace(/\*([^*\n]+)\*/g, '$1')           // unitalic
+    .replace(/^[\t ]*[-*•]\s+/gm, '')          // remove bullet points
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')   // strip markdown links, keep text
+    .replace(/\n{2,}/g, '. ')                  // collapse paragraph breaks
+    .replace(/\n/g, ' ')                        // collapse remaining newlines
+    .replace(/\s{2,}/g, ' ')                   // collapse whitespace
+    .replace(/\.\s*\./g, '.')                  // fix double dots
+    .trim()
+    .slice(0, maxChars);
+}
+
+// TTS audio cache for short repeated phrases to avoid redundant API calls
+const ttsCache = new Map<string, string>();
+
 async function playTTS(text: string): Promise<void> {
   try {
     const cfg = await (window.api as any).koda.getConfig();
     if (!cfg?.tts?.enabled || !cfg?.tts?.apiKey) return;
-    const result = await (window.api as any).koda.tts(text, cfg.tts);
-    if (!result?.data) return;
-    const bytes = Uint8Array.from(atob(result.data), c => c.charCodeAt(0));
+    const cleaned = stripForTTS(text);
+    if (!cleaned) return;
+    let b64 = ttsCache.get(cleaned);
+    if (!b64) {
+      const result = await (window.api as any).koda.tts(cleaned, cfg.tts);
+      if (!result?.data) return;
+      b64 = result.data as string;
+      // Only cache short static phrases (< 120 chars) to avoid unbounded memory
+      if (cleaned.length < 120) ttsCache.set(cleaned, b64);
+    }
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const url   = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
     return new Promise<void>(res => {
       const a = new Audio(url);
@@ -291,7 +322,7 @@ function useVoiceFlow(deps: {
         const silence = Date.now() - lastSound;
 
         if (speakingBegan  && silence > silenceMs) { recorder.stop(); return; }
-        if (!speakingBegan && silence > 6000)      { recorder.stop(); return; }
+        if (!speakingBegan && silence > 3000)      { recorder.stop(); return; }
 
         rafRef.current = requestAnimationFrame(tick);
       };

@@ -64,12 +64,40 @@ function createWindow() {
   return win;
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+// Single-instance lock — enables `koda .` CLI to open paths in a running instance
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_, argv) => {
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length > 0) {
+      const win = wins[0];
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+    const idx = argv.indexOf('--open-path');
+    if (idx >= 0 && argv[idx + 1]) {
+      BrowserWindow.getAllWindows()[0]?.webContents.send('app:openPath', argv[idx + 1]);
+    }
   });
-});
+
+  app.whenReady().then(() => {
+    const win = createWindow();
+
+    const idx = process.argv.indexOf('--open-path');
+    if (idx >= 0 && process.argv[idx + 1]) {
+      const pathToOpen = process.argv[idx + 1];
+      win.webContents.once('did-finish-load', () => {
+        win.webContents.send('app:openPath', pathToOpen);
+      });
+    }
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   if (runningShell) runningShell.kill();
@@ -273,20 +301,7 @@ ipcMain.handle('agent:applyEdit', (_, { filePath, content }: { filePath: string;
 
 ipcMain.handle('git:diff', (_, root: string) => {
   try {
-    // All changes vs last commit (staged + unstaged tracked files)
-    let diff = '';
-    try {
-      diff = execSync('git diff HEAD', { cwd: root, encoding: 'utf-8', maxBuffer: 2 * 1024 * 1024 });
-    } catch {
-      // No commits yet — fall back to staged + unstaged separately
-      const cached = execSync('git diff --cached', { cwd: root, encoding: 'utf-8', maxBuffer: 2 * 1024 * 1024 });
-      const unstaged = execSync('git diff', { cwd: root, encoding: 'utf-8', maxBuffer: 2 * 1024 * 1024 });
-      diff = [cached, unstaged].filter(Boolean).join('\n');
-    }
-    // Append list of untracked files so the AI knows about new files
-    const status = execSync('git status --porcelain', { cwd: root, encoding: 'utf-8' });
-    const untracked = status.split('\n').filter(l => l.startsWith('??')).map(l => l.slice(3).trim());
-    if (untracked.length) diff += `\n\n# Untracked files:\n${untracked.map(f => `#   ${f}`).join('\n')}`;
+    const diff = execSync('git diff --cached', { cwd: root, encoding: 'utf-8', maxBuffer: 2 * 1024 * 1024 });
     return diff;
   } catch { return ''; }
 });
@@ -834,36 +849,41 @@ function kodaAgentIcon(agent: string): string {
 
 const STEP_FINDINGS_FOOTER = `
 
-## Regra de saída obrigatória
-Ao concluir, escreva SEMPRE um bloco de achados estruturado:
+## SAÍDA OBRIGATÓRIA — escreva sempre ao finalizar:
 
 ## Achados
-- **Arquivo(s):** <caminhos encontrados ou "nenhum">
-- **Problema:** <descrição do problema real encontrado, ou "nenhum">
-- **Ação realizada:** <o que foi feito>
-- **Resultado:** <sucesso / falha / pendente>
+- **Arquivo(s):** <caminho(s) exato(s) ou "nenhum">
+- **Ação:** <o que foi feito em 1 linha>
+- **Resultado:** <sucesso | falha | pendente> — <motivo se falha>
 
-Este bloco é obrigatório — ele é passado como contexto ao próximo agente do pipeline para que ele não precise re-pesquisar.`;
+Este bloco é mandatório: é passado como contexto ao próximo agente para que não re-pesquise.`;
 
 function kodaStepSystemPrompt(agentType: string): string {
   const roles: Record<string, string> = {
-    code:   `Você é um agente especialista em engenharia de software. Execute a tarefa exatamente como solicitado usando as ferramentas disponíveis. Responda SEMPRE em português do Brasil.${STEP_FINDINGS_FOOTER}`,
-    review: `Você é um revisor de código sênior. Analise o código solicitado e forneça uma revisão estruturada com problemas (com referências de linha), sugestões e resumo geral. Responda SEMPRE em português do Brasil.${STEP_FINDINGS_FOOTER}`,
-    git:    `Você é um especialista em operações git e controle de versão. Execute as operações git necessárias usando o bash. Responda SEMPRE em português do Brasil.${STEP_FINDINGS_FOOTER}`,
+    code: `Você é um engenheiro de software sênior. Execute a tarefa EXATAMENTE como descrita — nem mais, nem menos.
+Regras: leia o arquivo antes de editar; use search_files para localizar código desconhecido; não execute builds ou testes a menos que explicitamente pedido; não abra arquivos desnecessários.
+Responda em português do Brasil.${STEP_FINDINGS_FOOTER}`,
+
+    review: `Você é um revisor de código sênior. Analise o código solicitado e produza uma revisão estruturada com: problemas encontrados (cite linha com [Lxxx]), sugestões de melhoria, e veredicto geral (APROVADO / REQUER ATENÇÃO / CRÍTICO).
+Seja direto e objetivo — sem elogios vazios. Responda em português do Brasil.${STEP_FINDINGS_FOOTER}`,
+
+    git: `Você é um especialista em git. Execute APENAS a operação git solicitada usando bash.
+Não edite arquivos de código. Não execute builds. Apenas git.
+Responda em português do Brasil.${STEP_FINDINGS_FOOTER}`,
   };
-  return roles[agentType] ?? `Você é um assistente especialista. Execute a tarefa. Responda SEMPRE em português do Brasil.${STEP_FINDINGS_FOOTER}`;
+  return roles[agentType] ?? `Você é um assistente especialista. Execute a tarefa exatamente como pedido. Responda em português do Brasil.${STEP_FINDINGS_FOOTER}`;
 }
 
 // Per-tool scope rule: tells the agent EXACTLY what to do and WHEN to stop.
 // This prevents step 1 from doing the work of steps 2-4.
 const TOOL_SCOPE: Record<string, string> = {
-  ask:         '⚠️ ESCOPO: Sua ÚNICA responsabilidade é pesquisar e descrever o que encontrou. NÃO edite arquivos, NÃO execute builds/testes, NÃO tente resolver problemas. Quando tiver a resposta, escreva o bloco ## Achados e PARE imediatamente.',
-  explain_file:'⚠️ ESCOPO: Leia e explique este arquivo APENAS. Não edite, não execute, não analise outros arquivos. Escreva ## Achados e PARE.',
-  review_file: '⚠️ ESCOPO: Revise este arquivo APENAS. Não edite, não execute, não analise outros arquivos. Escreva ## Achados e PARE.',
-  run_command: '⚠️ ESCOPO: Execute APENAS este comando e reporte o output exato. NÃO edite arquivos, NÃO execute outros comandos, NÃO tente corrigir problemas encontrados. Escreva ## Achados e PARE.',
-  edit_file:   '⚠️ ESCOPO: Edite APENAS o arquivo especificado conforme a instrução. Não execute builds, não edite outros arquivos. Escreva ## Achados e PARE.',
-  run_task:    '⚠️ ESCOPO: Execute a tarefa de codificação especificada. Ao terminar, escreva ## Achados com os arquivos modificados e PARE — não execute builds ou testes (isso é o próximo passo).',
-  commit:      '⚠️ ESCOPO: Faça apenas o commit. Escreva ## Achados e PARE.',
+  ask:         'ESCOPO: pesquise e descreva o que encontrou. NÃO edite arquivos. NÃO resolva problemas. Escreva ## Achados e pare.',
+  explain_file:'ESCOPO: leia e explique ESTE arquivo. Não edite, não execute, não analise outros arquivos. Escreva ## Achados e pare.',
+  review_file: 'ESCOPO: revise ESTE arquivo. Não edite, não execute. Liste problemas com [Lxxx], sugestões, veredicto. Escreva ## Achados e pare.',
+  run_command: 'ESCOPO: execute ESTE comando e reporte o output exato. Não edite arquivos. Não tente corrigir erros encontrados. Escreva ## Achados e pare.',
+  edit_file:   'ESCOPO: edite APENAS o arquivo especificado conforme a instrução. Não execute builds nem edite outros arquivos. Escreva ## Achados e pare.',
+  run_task:    'ESCOPO: execute a tarefa de codificação. Crie/edite os arquivos necessários. Ao terminar escreva ## Achados com arquivos modificados e pare — não execute builds ou testes.',
+  commit:      'ESCOPO: faça apenas o commit (git add + git commit). Escreva ## Achados e pare.',
 };
 
 function maxTurnsForTool(tool: string): number {
@@ -970,32 +990,23 @@ ipcMain.handle('koda:spokenSummary', async (_, {
         apiKey:    kodaWorkspace.ceo.apiKey,
         baseURL:   kodaWorkspace.ceo.baseURL ?? config.baseURL,
         model:     kodaWorkspace.ceo.model,
-        maxTokens: 400,
+        maxTokens: 220,
       });
     } else {
       if (!config.apiKey) return null;
-      provider = createProvider({ ...config, maxTokens: 400 });
+      provider = createProvider({ ...config, maxTokens: 220 });
     }
 
-    const stepsText = steps.map((s, i) => {
-      const detail = (s.result || s.error || '').slice(0, 400).trim();
-      const status  = s.error ? '✕ FALHOU' : '✓ OK';
-      return `${i + 1}. ${status} — ${s.step.description}${detail ? `\n   Detalhe: ${detail}` : ''}`;
-    }).join('\n');
+    const allOk  = steps.every(s => !s.error);
+    const failed = steps.filter(s => s.error).map(s => s.step.description).join(', ');
+    const done   = steps.filter(s => !s.error).map(s => s.step.description).join(', ');
 
-    const system = 'Você é KODA, assistente de desenvolvimento de software. Gere resumos falados em português do Brasil, conversacionais e informativos.';
-    const user   = `O usuário pediu: "${task}"
+    const system = 'Você é KODA. Gere resumos de tarefas em português do Brasil, curtos e diretos para leitura em voz alta. Sem formatação, sem markdown, sem listas.';
+    const user   = `Tarefa: "${task}"
+Resultado: ${allOk ? 'sucesso' : `falha em — ${failed}`}
+O que foi feito: ${done || 'nada concluído'}
 
-Passos executados pelo agente:
-${stepsText}
-
-Gere um resumo falado em português do Brasil para ser lido em voz alta (4-6 frases). O resumo deve:
-- Dizer se a tarefa foi concluída com sucesso ou não
-- Explicar brevemente o que foi feito e como
-- Citar problemas encontrados, se houver, e como foram (ou não) resolvidos
-- Ser natural e direto, como se você estivesse conversando com o usuário
-
-Responda APENAS com o texto do resumo, sem formatação.`;
+Gere exatamente 2 frases curtas e naturais resumindo o resultado. Sem markdown, sem listas. Apenas texto corrido.`;
 
     const res = await provider.complete({
       messages: [

@@ -102,6 +102,7 @@ declare global {
         saveHistory: (projectRoot: string, entry: KodaHistoryEntry) => Promise<{ ok?: boolean }>;
       };
       openProject: () => Promise<string | null>;
+      onOpenPath: (cb: (path: string) => void) => void;
       getFileTree: (dir: string) => Promise<FileNode[]>;
       renameFile: (oldPath: string, newPath: string) => Promise<{ ok?: boolean; error?: string }>;
       watchProject: (root: string) => Promise<void>;
@@ -290,6 +291,28 @@ export default function App() {
     }, 1500);
     return () => clearTimeout(timer);
   }, [workspaces, streamingChatIds]);
+
+  // Handle `koda .` CLI — open a new workspace for the given path
+  useEffect(() => {
+    window.api.onOpenPath(async (folder: string) => {
+      const existing = workspacesRef.current.find(ws => ws.projectRoot === folder);
+      if (existing) {
+        setActiveWorkspaceId(existing.id);
+        return;
+      }
+      const [tree, savedChats] = await Promise.all([
+        window.api.getFileTree(folder),
+        window.api.loadChats(folder),
+      ]);
+      const name = folder.split('/').pop() ?? 'Project';
+      const ws = newWorkspace(name);
+      const chats = savedChats && savedChats.length > 0 ? sanitizeChats(savedChats) : ws.chats;
+      const wsReady = { ...ws, name, projectRoot: folder, files: tree, chats };
+      setWorkspaces(prev => [...prev, wsReady]);
+      setActiveWorkspaceId(wsReady.id);
+      window.api.watchProject(folder).catch(() => {});
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

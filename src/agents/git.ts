@@ -54,7 +54,7 @@ const server = createMCPServer('koda-git-agent', '1.0.0', [
     },
     handler: async ({ staged }) => {
       try {
-        const cmd = staged ? 'diff --cached' : 'diff --cached';
+        const cmd = staged ? 'diff --cached' : 'diff';
         let diff = git(cmd);
         if (!diff && !staged) diff = git('diff HEAD');
         return diff || 'Nenhuma alteração encontrada.';
