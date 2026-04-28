@@ -1,5 +1,27 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+// ── Kanban CEO event routing ───────────────────────────────────────────────
+// Intercept koda:done / koda:progress for workspaceIds prefixed with 'kanban-'
+// and route them to kanban-specific handlers, independently from KodaPanel.
+
+type KanbanCeoDoneHandler     = (data: { workspaceId: string; error?: string }) => void;
+type KanbanCeoProgressHandler = (data: { workspaceId: string; event: unknown }) => void;
+
+const _kanbanDoneHandlers     = new Set<KanbanCeoDoneHandler>();
+const _kanbanProgressHandlers = new Set<KanbanCeoProgressHandler>();
+
+ipcRenderer.on('koda:done', (_, data) => {
+  if (typeof data?.workspaceId === 'string' && data.workspaceId.startsWith('kanban-')) {
+    _kanbanDoneHandlers.forEach(cb => cb(data));
+  }
+});
+
+ipcRenderer.on('koda:progress', (_, data) => {
+  if (typeof data?.workspaceId === 'string' && data.workspaceId.startsWith('kanban-')) {
+    _kanbanProgressHandlers.forEach(cb => cb(data));
+  }
+});
+
 contextBridge.exposeInMainWorld('api', {
   // ── project ────────────────────────────────────────────────────────────────
   openProject: () => ipcRenderer.invoke('dialog:openProject'),
@@ -132,4 +154,14 @@ contextBridge.exposeInMainWorld('api', {
   gitCheckout: (root: string, branch: string) => ipcRenderer.invoke('git:checkout', { root, branch }),
   gitPush: (root: string) => ipcRenderer.invoke('git:push', root),
   gitPull: (root: string) => ipcRenderer.invoke('git:pull', root),
+
+  // ── kanban ─────────────────────────────────────────────────────────────────
+  loadKanban: (projectRoot: string) => ipcRenderer.invoke('kanban:load', projectRoot),
+  saveKanban: (projectRoot: string, cards: unknown[]) => ipcRenderer.invoke('kanban:save', { projectRoot, cards }),
+  proposeKanban: (projectRoot: string, cfg: { apiKey: string; baseUrl: string; model: string }) =>
+    ipcRenderer.invoke('kanban:propose', { projectRoot, ...cfg }),
+  onKanbanCeoDone:     (cb: KanbanCeoDoneHandler)     => _kanbanDoneHandlers.add(cb),
+  offKanbanCeoDone:    (cb: KanbanCeoDoneHandler)     => _kanbanDoneHandlers.delete(cb),
+  onKanbanCeoProgress: (cb: KanbanCeoProgressHandler) => _kanbanProgressHandlers.add(cb),
+  offKanbanCeoProgress:(cb: KanbanCeoProgressHandler) => _kanbanProgressHandlers.delete(cb),
 });

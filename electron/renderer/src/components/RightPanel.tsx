@@ -3,8 +3,9 @@ import { Workspace } from '../App';
 import EditorTab from './EditorTab';
 import BrowserTab from './BrowserTab';
 import GitTab from './GitTab';
+import KanbanTab from './KanbanTab';
 
-type Tab = 'editor' | 'browser' | 'git';
+type Tab = 'editor' | 'browser' | 'git' | 'kanban';
 
 interface Props {
   workspace: Workspace | null;
@@ -36,6 +37,7 @@ export default function RightPanel({ workspace, onFileAction, onOpenProject, onS
         <button className={`right-tab ${tab === 'editor' ? 'active' : ''}`} onClick={() => openTab('editor')}>Editor</button>
         <button className={`right-tab ${tab === 'browser' ? 'active' : ''}`} onClick={() => openTab('browser')}>Browser</button>
         <button className={`right-tab ${tab === 'git' ? 'active' : ''}`} onClick={() => openTab('git')}>Git</button>
+        <button className={`right-tab ${tab === 'kanban' ? 'active' : ''}`} onClick={() => openTab('kanban')}>Kanban</button>
       </div>
 
       <div className="right-panel-body">
@@ -59,6 +61,11 @@ export default function RightPanel({ workspace, onFileAction, onOpenProject, onS
         {mounted.has('git') && (
           <div style={paneStyle('git')}>
             <GitTab projectRoot={workspace?.projectRoot ?? null} />
+          </div>
+        )}
+        {mounted.has('kanban') && (
+          <div style={paneStyle('kanban')}>
+            <KanbanTab projectRoot={workspace?.projectRoot ?? null} />
           </div>
         )}
       </div>

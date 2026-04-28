@@ -1,0 +1,108 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+
+  <!-- Background -->
+  <radialGradient id="bg" cx="46%" cy="40%" r="66%">
+    <stop offset="0%"   stop-color="#151A34"/>
+    <stop offset="50%"  stop-color="#0B0E20"/>
+    <stop offset="100%" stop-color="#05060F"/>
+  </radialGradient>
+
+  <!-- Ambient behind K -->
+  <radialGradient id="amb" cx="52%" cy="46%" r="52%">
+    <stop offset="0%"   stop-color="#2855C8" stop-opacity="0.18"/>
+    <stop offset="100%" stop-color="#2855C8" stop-opacity="0"/>
+  </radialGradient>
+
+  <!-- Vertical bar: bright cyan top → deep blue bottom -->
+  <linearGradient id="barG" x1="241" y1="172" x2="241" y2="750" gradientUnits="userSpaceOnUse">
+    <stop offset="0%"   stop-color="#80DFFF"/>
+    <stop offset="20%"  stop-color="#56B8FF"/>
+    <stop offset="55%"  stop-color="#3E84F8"/>
+    <stop offset="100%" stop-color="#2C5EDE"/>
+  </linearGradient>
+
+  <!-- Upper arm: cyan-blue (inner) → blue (outer) -->
+  <linearGradient id="upG" x1="292" y1="172" x2="820" y2="500" gradientUnits="userSpaceOnUse">
+    <stop offset="0%"   stop-color="#88E2FF"/>
+    <stop offset="25%"  stop-color="#5ABBFF"/>
+    <stop offset="68%"  stop-color="#4088F6"/>
+    <stop offset="100%" stop-color="#3268E2"/>
+  </linearGradient>
+
+  <!-- Lower arm: indigo → violet-purple -->
+  <linearGradient id="loG" x1="292" y1="440" x2="848" y2="840" gradientUnits="userSpaceOnUse">
+    <stop offset="0%"   stop-color="#5268F8"/>
+    <stop offset="28%"  stop-color="#6E52EE"/>
+    <stop offset="68%"  stop-color="#8E42E4"/>
+    <stop offset="100%" stop-color="#A628D2"/>
+  </linearGradient>
+
+  <!-- Specular sheen (white → transparent, top-to-bottom) -->
+  <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%"   stop-color="white" stop-opacity="0.22"/>
+    <stop offset="100%" stop-color="white" stop-opacity="0"/>
+  </linearGradient>
+
+  <!-- Clip to rounded background -->
+  <clipPath id="roundClip">
+    <rect width="1024" height="1024" rx="230"/>
+  </clipPath>
+
+  <!-- Bloom glow on K shapes -->
+  <filter id="kGlow" x="-24%" y="-24%" width="148%" height="148%">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="blur"/>
+    <feMerge>
+      <feMergeNode in="blur"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+
+</defs>
+
+<!-- Background -->
+<rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+
+<!-- Ambient glow behind K -->
+<rect width="1024" height="1024" rx="230" fill="url(#amb)"/>
+
+<g clip-path="url(#roundClip)">
+  <g filter="url(#kGlow)">
+
+    <!-- Vertical bar -->
+    <rect x="185" y="172" width="107" height="578" rx="5" fill="url(#barG)"/>
+    <rect x="185" y="172" width="107" height="250" rx="5" fill="url(#sheen)"/>
+
+    <!--
+      Upper arm — parallelogram going upper-right.
+      Inner edge: (292, 444) to (840, 172)
+      Outer edge: (840, 255) to (329, 526)
+      40 px notch gap separates upper/lower arm inner starts.
+    -->
+    <polygon points="292,444  840,172  840,255  329,526" fill="url(#upG)"/>
+    <polygon points="292,444  840,172  848,198  300,468" fill="white" opacity="0.13"/>
+
+    <!--
+      Lower arm — parallelogram going lower-right.
+      Inner edge: (292, 484) to (840, 752)
+      Outer edge: (840, 836) to (292, 568)
+    -->
+    <polygon points="292,484  840,752  840,836  292,568" fill="url(#loG)"/>
+    <polygon points="292,484  840,752  840,766  292,499" fill="white" opacity="0.08"/>
+
+  </g>
+</g>
+
+<!-- KODA wordmark — EXO 2 Semibold, wide tracking -->
+<text
+  x="512" y="856"
+  text-anchor="middle"
+  font-family="'Exo 2', 'Futura', 'Century Gothic', 'Trebuchet MS', sans-serif"
+  font-weight="600"
+  font-size="78"
+  letter-spacing="20"
+  fill="white"
+  opacity="0.82"
+>KODA</text>
+
+</svg>

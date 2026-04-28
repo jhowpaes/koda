@@ -147,6 +147,13 @@ declare global {
       gitCheckout: (root: string, branch: string) => Promise<{ ok?: boolean; error?: string }>;
       gitPush: (root: string) => Promise<{ ok?: boolean; error?: string }>;
       gitPull: (root: string) => Promise<{ ok?: boolean; error?: string }>;
+      loadKanban: (projectRoot: string) => Promise<import('./components/KanbanTab').KanbanCard[]>;
+      saveKanban: (projectRoot: string, cards: import('./components/KanbanTab').KanbanCard[]) => Promise<{ ok?: boolean; error?: string }>;
+      proposeKanban: (projectRoot: string, cfg: { apiKey: string; baseUrl: string; model: string }) => Promise<{ cards?: import('./components/KanbanTab').KanbanCard[]; error?: string }>;
+      onKanbanCeoDone:     (cb: (data: { workspaceId: string; error?: string }) => void) => void;
+      offKanbanCeoDone:    (cb: (data: { workspaceId: string; error?: string }) => void) => void;
+      onKanbanCeoProgress: (cb: (data: { workspaceId: string; event: unknown }) => void) => void;
+      offKanbanCeoProgress:(cb: (data: { workspaceId: string; event: unknown }) => void) => void;
     };
   }
 }

@@ -15,13 +15,13 @@ npm run dist:mac       # build .dmg para macOS
 ### Layout
 
 ```
-┌──────┬──────────────────────┬──────────────────────────────────┐
-│      │                      │  Editor │ Browser │ Git          │
-│      │   Chat / KODA        │──────────────────────────────────│
-│ Rail │   (painel esquerdo)  │                                  │
-│      │                      │   Conteúdo da aba ativa          │
-│      │                      │                                  │
-└──────┴──────────────────────┴──────────────────────────────────┘
+┌──────┬──────────────────────┬────────────────────────────────────────┐
+│      │                      │  Editor │ Browser │ Git │ Kanban       │
+│      │   Chat / KODA        │────────────────────────────────────────│
+│ Rail │   (painel esquerdo)  │                                        │
+│      │                      │   Conteúdo da aba ativa                │
+│      │                      │                                        │
+└──────┴──────────────────────┴────────────────────────────────────────┘
 ```
 
 A largura do painel esquerdo é ajustável via drag (220px – 640px).
@@ -146,6 +146,37 @@ A porta é detectada automaticamente a partir do output (`localhost:PORT`) e o p
 | **Commit** | Textarea para a mensagem; `✨ Generate with AI` para gerar via LLM; botão **Commit** |
 | **Recent commits** | Lista com hash e mensagem; clique para ver o diff do commit |
 | **Diff viewer** | Diff colorido do arquivo ou commit selecionado (verde = add, vermelho = remove) |
+
+---
+
+### Aba Kanban
+
+Board de tarefas por workspace, salvo em `.koda/kanban.json` na raiz do projeto.
+
+**Colunas:**
+
+| Coluna | Uso |
+|---|---|
+| **Backlog** | Tarefas identificadas mas ainda sem prioridade |
+| **Next** | Próximas a serem iniciadas |
+| **In Progress** | Em desenvolvimento ativo |
+| **Testing** | Aguardando validação ou testes |
+| **Done** | Concluídas |
+
+**Cards:**
+
+Cada card possui título, descrição opcional, prioridade (`low` / `medium` / `high`) e origem (`user` ou `agent`). Cards criados pelos agentes de AI aparecem com ícone 🤖.
+
+**Interações:**
+
+| Ação | Como |
+|---|---|
+| Criar card | Clique **+ Add card** na coluna desejada; `Enter` confirma, `Esc` cancela |
+| Mover card | Arraste e solte (drag & drop) entre colunas |
+| Editar card | Clique **✎** no card — modal com título, descrição, prioridade e coluna |
+| Excluir card | Clique **✕** no card |
+
+**Persistência:** os cards são salvos automaticamente (debounce 400ms) em `.koda/kanban.json`. O arquivo é individual por projeto e pode ser versionado junto com o código.
 
 ---
 

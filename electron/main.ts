@@ -207,6 +207,120 @@ ipcMain.handle('fs:saveChats', (_, { projectRoot, chats }: { projectRoot: string
   } catch (e) { return { error: (e as Error).message }; }
 });
 
+ipcMain.handle('kanban:load', (_, projectRoot: string) => {
+  try {
+    const file = path.join(projectRoot, '.koda', 'kanban.json');
+    if (!fs.existsSync(file)) return [];
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch { return []; }
+});
+
+ipcMain.handle('kanban:save', (_, { projectRoot, cards }: { projectRoot: string; cards: unknown[] }) => {
+  try {
+    const dir = path.join(projectRoot, '.koda');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'kanban.json'), JSON.stringify(cards, null, 2), 'utf-8');
+    return { ok: true };
+  } catch (e) { return { error: (e as Error).message }; }
+});
+
+ipcMain.handle('kanban:propose', async (_, {
+  projectRoot, apiKey, baseUrl, model,
+}: { projectRoot: string; apiKey: string; baseUrl: string; model: string }) => {
+  try {
+    if (!apiKey) return { error: 'No API key configured. Go to Settings → Providers.' };
+
+    // Build project context
+    let context = `Project: ${path.basename(projectRoot)}\n\n`;
+
+    const pkgPath = path.join(projectRoot, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        const compact = {
+          name: pkg.name, description: pkg.description,
+          scripts: Object.keys(pkg.scripts ?? {}),
+          deps: Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).slice(0, 30),
+        };
+        context += `package.json:\n${JSON.stringify(compact, null, 2)}\n\n`;
+      } catch {}
+    }
+
+    const readmePath = path.join(projectRoot, 'README.md');
+    if (fs.existsSync(readmePath)) {
+      context += `README:\n${fs.readFileSync(readmePath, 'utf-8').slice(0, 2500)}\n\n`;
+    }
+
+    function treeLines(nodes: ReturnType<typeof readTree>, indent = 0): string[] {
+      const lines: string[] = [];
+      for (const n of nodes.slice(0, 40)) {
+        lines.push('  '.repeat(indent) + (n.type === 'dir' ? '📁 ' : '   ') + n.name);
+        if (n.type === 'dir' && n.children?.length) {
+          lines.push(...treeLines(n.children, indent + 1));
+        }
+      }
+      return lines;
+    }
+    context += `File tree:\n${treeLines(readTree(projectRoot, 0)).join('\n')}\n`;
+
+    const systemPrompt = `You are a senior software engineering consultant. Analyze the project and propose actionable tasks.
+Return ONLY a JSON array — no explanation, no markdown fences, no extra text.
+Each item must have exactly: title (string ≤80 chars), description (string, 1-2 sentences), priority ("low"|"medium"|"high"), category ("bug"|"refactor"|"feature").
+Propose 6-12 tasks. Be specific and actionable.`;
+
+    const userPrompt = `Analyze this project and propose tasks:\n\n${context}`;
+
+    const isAnthropic = model.startsWith('claude') || (baseUrl ?? '').includes('anthropic');
+    let raw = '';
+
+    if (isAnthropic) {
+      const client = new Anthropic({ apiKey });
+      const res = await client.messages.create({
+        model, max_tokens: 2048,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      });
+      const block = res.content.find(b => b.type === 'text');
+      raw = block && block.type === 'text' ? block.text : '';
+    } else {
+      const { default: OpenAI } = await import('openai');
+      const client = new OpenAI({ apiKey, baseURL: baseUrl || undefined });
+      const res = await client.chat.completions.create({
+        model, max_tokens: 2048,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      });
+      raw = res.choices[0]?.message?.content ?? '';
+    }
+
+    // Extract JSON array robustly
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (!match) return { error: 'Model did not return a JSON array.' };
+    const tasks = JSON.parse(match[0]) as Array<{
+      title: string; description?: string; priority?: string; category?: string;
+    }>;
+
+    const now = new Date().toISOString();
+    const cards = tasks.map((t, i) => ({
+      id: `agent-${Date.now()}-${i}`,
+      title: String(t.title ?? '').slice(0, 80),
+      description: t.description ? String(t.description) : undefined,
+      column: 'backlog',
+      createdBy: 'agent',
+      createdAt: now,
+      updatedAt: now,
+      priority: ['low', 'medium', 'high'].includes(t.priority ?? '') ? t.priority : 'medium',
+      tags: t.category ? [String(t.category)] : undefined,
+    }));
+
+    return { cards };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+});
+
 // ─── IPC: shell runner ─────────────────────────────────────────────────────────
 
 ipcMain.on('shell:run', (event, { root, command }: { root: string; command: string }) => {
