@@ -21,6 +21,30 @@ npm run dist:mac       # build .dmg para macOS
 | **Chat** | Histórico de sessão persistente por workspace, contexto do codebase injetado automaticamente |
 | **KODA** | CEO agent: orquestra code/review/git agents em tarefas multi-step; toggle por workspace |
 
+### Painel KODA
+
+O painel KODA é o CEO agent integrado ao desktop. Cada workspace tem seu próprio toggle Chat ↔ KODA.
+
+**Como funciona:**
+
+1. Digite a tarefa no campo de input (ex: `"revisa src/auth.ts, corrige os bugs e commita"`)
+2. O CEO planeja automaticamente os steps necessários, mostrando complexidade (`simple` / `moderate` / `complex`)
+3. Cada step é executado em sequência com progresso visível — agente, tool e descrição
+4. O resultado de cada step alimenta o próximo automaticamente
+5. Ao finalizar, exibe um summary da execução
+
+**Funcionalidades:**
+- Abas por agente (`code` / `review` / `git`) quando há múltiplos steps
+- Indicador de status por step: `○` pendente → spinner → `✓` concluído / `✕` erro
+- Botão **Stop** para interromper a qualquer momento
+- Entrada por voz via STT (🎤) — transcreve e preenche o campo automaticamente
+- Leitura do summary em voz via TTS ao concluir (configurável)
+- Badge de execução ativa na barra lateral (ponto pulsante por workspace)
+
+**Configuração de voz (Settings → ⚡ KODA):**
+- TTS: habilitar, API key OpenAI, voz (alloy/echo/fable/onyx/nova/shimmer), modelo (tts-1 / tts-1-hd), velocidade
+- STT: habilitar, API key OpenAI (Whisper)
+
 ---
 
 ## Como o contexto funciona
