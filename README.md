@@ -142,12 +142,6 @@ build/
 
 ---
 
-## Roadmap
-
-Ver [ROADMAP.md](./ROADMAP.md) para o plano completo de evolução.
-
----
-
 ## CLI (bônus)
 
 O Koda também funciona como CLI em qualquer projeto via `ai`:
@@ -163,3 +157,15 @@ ai commit
 ai run "adicionar middleware de autenticação JWT"
 ai chat
 ```
+
+---
+
+## Contribuindo
+
+Veja [CONTRIBUTING.md](./CONTRIBUTING.md) para instruções de setup e como enviar pull requests.
+
+---
+
+## Licença
+
+[MIT](./LICENSE)
