@@ -93,6 +93,9 @@ if (!gotLock) {
       });
     }
 
+    // Watch ~/.claude.json and notify renderer when the account changes
+    watchClaudeJson(win);
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -103,6 +106,30 @@ app.on('window-all-closed', () => {
   if (runningShell) runningShell.kill();
   if (process.platform !== 'darwin') app.quit();
 });
+
+// ─── Claude Code account watcher ─────────────────────────────────────────────
+
+import os from 'os';
+const CLAUDE_JSON_PATH = path.join(os.homedir(), '.claude.json');
+
+function watchClaudeJson(win: BrowserWindow) {
+  if (!fs.existsSync(CLAUDE_JSON_PATH)) return;
+
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+
+  fs.watch(CLAUDE_JSON_PATH, () => {
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(async () => {
+      try {
+        const { getStatus } = await import('./claude-code-auth.js');
+        const status = getStatus();
+        if (!win.isDestroyed()) {
+          win.webContents.send('claudecode:account:changed', status);
+        }
+      } catch {}
+    }, 300);
+  });
+}
 
 // ─── IPC: permissions ────────────────────────────────────────────────────────
 
@@ -608,11 +635,12 @@ async function runAnthropicAgentic(
   signal: AbortSignal,
   customSystemPrompt?: string,
   maxTurns = 20,
+  useOAuth = false,
 ): Promise<string> {
   let finalText = '';
   const toolLog: string[] = [];  // compact capture of key tool results for inter-step context
   const emit = (ev: AgentEvent) => sender.send('agent:event', { chatId, ...ev });
-  const client = new Anthropic({ apiKey });
+  const client = useOAuth ? new Anthropic({ authToken: apiKey }) : new Anthropic({ apiKey });
   const useThinking = supportsThinking(model);
   const systemPrompt = customSystemPrompt
     ? `${customSystemPrompt}\n\n---\n${agenticSystemPrompt(root)}`
@@ -814,15 +842,15 @@ function agenticSystemPrompt(root: string): string {
 }
 
 ipcMain.on('agent:chat:agentic', async (event, {
-  root, chatId, message, apiKey, baseUrl, model, isAnthropic, systemPrompt,
-}: { root: string; chatId: string; message: string; apiKey: string; baseUrl: string; model: string; isAnthropic: boolean; systemPrompt?: string }) => {
+  root, chatId, message, apiKey, baseUrl, model, isAnthropic, useOAuth, systemPrompt,
+}: { root: string; chatId: string; message: string; apiKey: string; baseUrl: string; model: string; isAnthropic: boolean; useOAuth?: boolean; systemPrompt?: string }) => {
   const sender = event.sender;
   agentAbortControllers.get(chatId)?.abort();
   const ctrl = new AbortController();
   agentAbortControllers.set(chatId, ctrl);
   try {
-    if (isAnthropic) {
-      await runAnthropicAgentic(sender, chatId, root, message, apiKey, model, ctrl.signal, systemPrompt);
+    if (isAnthropic || useOAuth) {
+      await runAnthropicAgentic(sender, chatId, root, message, apiKey, model, ctrl.signal, systemPrompt, 20, useOAuth);
     } else {
       await runOpenAIAgentic(sender, chatId, root, message, apiKey, baseUrl, model, ctrl.signal, systemPrompt);
     }
@@ -1139,11 +1167,23 @@ ipcMain.on('koda:run', async (event, {
         const message = kodaStepMessage(step, context);
         const isAnthropicModel = cfg.model.startsWith('claude') || cfg.baseUrl.includes('anthropic');
 
+        // Resolve short-lived / OAuth tokens before each step
+        let stepApiKey = cfg.apiKey;
+        let stepUseOAuth = false;
+        if (cfg.apiKey === 'copilot-oauth') {
+          const { getValidCopilotToken } = await import('./copilot-auth.js');
+          stepApiKey = (await getValidCopilotToken()) ?? cfg.apiKey;
+        } else if (cfg.apiKey === 'claude-code-oauth') {
+          const { getValidToken } = await import('./claude-code-auth.js');
+          stepApiKey = (await getValidToken()) ?? cfg.apiKey;
+          stepUseOAuth = true;
+        }
+
         // Use real agentic runner with file system tools instead of dumb completion
         const turns = maxTurnsForTool(step.tool);
-        const result = isAnthropicModel
-          ? await runAnthropicAgentic(sender, chatId, projectRoot, message, cfg.apiKey, cfg.model, ctrl.signal, cfg.systemPrompt, turns)
-          : await runOpenAIAgentic(sender, chatId, projectRoot, message, cfg.apiKey, cfg.baseUrl, cfg.model, ctrl.signal, cfg.systemPrompt, turns);
+        const result = (isAnthropicModel || stepUseOAuth)
+          ? await runAnthropicAgentic(sender, chatId, projectRoot, message, stepApiKey, cfg.model, ctrl.signal, cfg.systemPrompt, turns, stepUseOAuth)
+          : await runOpenAIAgentic(sender, chatId, projectRoot, message, stepApiKey, cfg.baseUrl, cfg.model, ctrl.signal, cfg.systemPrompt, turns);
 
         stepResults[i] = { step, result };
         sender.send('agent:done', chatId);
@@ -1301,3 +1341,47 @@ function readTree(dir: string, depth: number): FileNode[] {
       }));
   } catch { return []; }
 }
+
+// ─── IPC: Claude Code account ─────────────────────────────────────────────────
+
+ipcMain.handle('claudecode:auth:status', async () => {
+  const { getStatus } = await import('./claude-code-auth.js');
+  return getStatus();
+});
+
+ipcMain.handle('claudecode:token:get', async () => {
+  const { getValidToken } = await import('./claude-code-auth.js');
+  return getValidToken();
+});
+
+// ─── IPC: GitHub Copilot OAuth ────────────────────────────────────────────────
+
+ipcMain.handle('copilot:auth:start', async (_, clientId?: string) => {
+  const { startDeviceFlow, DEFAULT_CLIENT_ID } = await import('./copilot-auth.js');
+  return startDeviceFlow(clientId ?? DEFAULT_CLIENT_ID);
+});
+
+ipcMain.handle('copilot:auth:poll', async (_, { deviceCode, clientId }: { deviceCode: string; clientId?: string }) => {
+  const { pollForGithubToken, completeAuth, DEFAULT_CLIENT_ID } = await import('./copilot-auth.js');
+  const result = await pollForGithubToken(clientId ?? DEFAULT_CLIENT_ID, deviceCode);
+  if (result === 'pending' || result === 'expired') return { status: result };
+  // Got a GitHub token — exchange it for Copilot token and persist
+  const authStatus = await completeAuth(result);
+  return { status: 'complete', ...authStatus };
+});
+
+ipcMain.handle('copilot:auth:status', async () => {
+  const { getAuthStatus } = await import('./copilot-auth.js');
+  return getAuthStatus();
+});
+
+ipcMain.handle('copilot:auth:logout', async () => {
+  const { clearAuth } = await import('./copilot-auth.js');
+  clearAuth();
+  return { ok: true };
+});
+
+ipcMain.handle('copilot:token:get', async () => {
+  const { getValidCopilotToken } = await import('./copilot-auth.js');
+  return getValidCopilotToken();
+});

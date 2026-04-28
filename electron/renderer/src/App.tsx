@@ -783,7 +783,7 @@ export default function App() {
     ));
   }, [activeWorkspaceId]);
 
-  function sendMessage(chatId: string, text: string, mode: 'chat' | 'ask') {
+  async function sendMessage(chatId: string, text: string, mode: 'chat' | 'ask') {
     const ws = getActiveWorkspace();
     if (!ws?.projectRoot || streamingChatIdsRef.current.has(chatId)) return;
 
@@ -825,11 +825,24 @@ export default function App() {
 
     startStreaming(chatId);
     if (useAgentic) {
+      let resolvedApiKey = matchingProvider!.apiKey;
+      let useOAuth = false;
+
+      if (matchingProvider!.id === 'github-copilot') {
+        const token = await (window.api as any).copilot.getToken().catch(() => null);
+        resolvedApiKey = token ?? resolvedApiKey;
+      } else if (matchingProvider!.id === 'claude-code') {
+        const token = await (window.api as any).claudeCode.getToken().catch(() => null);
+        resolvedApiKey = token ?? resolvedApiKey;
+        useOAuth = true;
+      }
+
       window.api.chatAgentic(ws.projectRoot, chatId, text, {
-        apiKey: matchingProvider!.apiKey,
+        apiKey: resolvedApiKey,
         baseUrl: matchingProvider!.baseUrl,
         model: resolvedModel,
         isAnthropic: matchingProvider!.id === 'anthropic',
+        useOAuth,
         systemPrompt: agentConfig?.systemPrompt || undefined,
       });
     } else if (mode === 'chat') {

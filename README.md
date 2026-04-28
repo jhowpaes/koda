@@ -166,7 +166,45 @@ Aberto via `⚙` na WorkspaceRail. Três abas:
 
 #### AI Providers
 
-Gerencia os providers de LLM disponíveis no app. Providers padrão: OpenAI, Anthropic, Google Gemini, GLM/ZhipuAI.
+Gerencia os providers de LLM disponíveis no app. No topo da aba ficam as integrações com autenticação própria; abaixo, os providers configurados manualmente.
+
+---
+
+##### Claude Code
+
+Detecta automaticamente a conta logada no **Claude Desktop** ou no **Claude Code CLI**, lendo as credenciais de `~/.claude.json`. Não exige API key — usa o OAuth token da conta existente.
+
+- Se conectado: exibe nome, email e plano da conta
+- Se desconectado: exibe instruções para fazer login (`claude login`)
+- **Troca de conta em tempo real**: quando a conta é trocada no Claude Desktop (logout → login com outra conta), o KODA detecta a mudança em `~/.claude.json` e atualiza o provider automaticamente — sem fechar o app
+- Provider gerado automaticamente: `claude-code` com `baseUrl: https://api.anthropic.com`
+- Modelos disponíveis: `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`
+- Credenciais salvas em `~/.koda/copilot-auth.json`
+
+---
+
+##### GitHub Copilot
+
+Autentica com GitHub via **OAuth Device Flow** — sem API key, sem CLI.
+
+**Fluxo de conexão:**
+1. Clique **Conectar com GitHub** — o browser abre automaticamente em `github.com/login/device`
+2. Insira o código exibido no app (formato `XXXX-XXXX`)
+3. Clique **Já autorizei, continuar** — o app detecta a autorização e salva o token
+4. Provider `github-copilot` é criado automaticamente
+
+**Detalhes:**
+- Requer assinatura ativa do GitHub Copilot (Individual, Business ou Enterprise)
+- Token Copilot é renovado automaticamente antes de cada chamada (tokens têm validade ~30 min)
+- Credenciais salvas em `~/.koda/copilot-auth.json`
+- Botão ✕ desconecta e remove o provider; para trocar de conta GitHub basta conectar novamente
+- Modelos disponíveis via Copilot: `gpt-4o`, `gpt-4o-mini`, `o3-mini`, `claude-3.5-sonnet`, `claude-3.7-sonnet`, `gemini-2.0-flash`
+
+---
+
+##### Providers manuais
+
+Providers padrão incluídos: OpenAI, Anthropic, Google Gemini, GLM/ZhipuAI.
 
 Por provider:
 - Nome (editável)
@@ -286,12 +324,15 @@ Sobrescreve o LLM para um projeto específico. Tem prioridade sobre as variávei
 
 Qualquer provedor com API compatível com OpenAI funciona via `LLM_BASE_URL`:
 
-| Provedor | BASE_URL | Modelo |
-|---|---|---|
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
-| Z.ai (GLM) | `https://api.z.ai/api/coding/paas/v4` | `glm-5.1` |
-| Groq | `https://api.groq.com/openai/v1` | `llama-3.1-70b-versatile` |
-| Ollama (local) | `http://localhost:11434/v1` | `llama3.2` |
+| Provedor | BASE_URL | Modelo | Auth |
+|---|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o` | API key |
+| Anthropic | `https://api.anthropic.com` | `claude-sonnet-4-6` | API key |
+| GitHub Copilot | `https://api.githubcopilot.com` | `gpt-4o`, `claude-3.7-sonnet`, … | OAuth (app) |
+| Claude Code | `https://api.anthropic.com` | `claude-opus-4-7`, … | OAuth (Claude Desktop) |
+| Z.ai (GLM) | `https://api.z.ai/api/coding/paas/v4` | `glm-5.1` | API key |
+| Groq | `https://api.groq.com/openai/v1` | `llama-3.1-70b-versatile` | API key |
+| Ollama (local) | `http://localhost:11434/v1` | `llama3.2` | — |
 
 ---
 
@@ -400,6 +441,8 @@ npm run gen-icon
 electron/
   main.ts               → processo principal Electron + handlers IPC
   preload.ts            → bridge main ↔ renderer
+  copilot-auth.ts       → OAuth Device Flow do GitHub Copilot (token store em ~/.koda/copilot-auth.json)
+  claude-code-auth.ts   → leitura de credenciais do Claude Code (~/.claude.json) + watcher de conta
   renderer/             → React app (UI)
 
 src/

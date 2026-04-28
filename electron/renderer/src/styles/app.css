@@ -2277,3 +2277,105 @@ html, body, #root {
   color: var(--text-dim);
   margin-top: 6px;
 }
+
+/* ── Claude Code section ────────────────────────────────────────────────────── */
+
+.claude-code-card {
+  border-color: #3d2b1f;
+  background: rgba(255, 140, 66, 0.04);
+}
+
+.claude-code-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d97b42, #b85c22);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 140, 66, 0.3);
+}
+
+/* ── GitHub Copilot section ─────────────────────────────────────────────────── */
+
+.copilot-card {
+  border-color: #30363d;
+  background: rgba(36, 41, 47, 0.4);
+}
+
+.copilot-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.1);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+  border-radius: 10px;
+  padding: 2px 8px;
+  letter-spacing: 0.5px;
+}
+
+.copilot-code {
+  font-family: monospace;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--text);
+  background: var(--hover-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 20px;
+  text-align: center;
+  margin: 10px 0;
+}
+
+.copilot-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+.copilot-link:hover { text-decoration: underline; }
+
+.copilot-connect-btn {
+  width: 100%;
+  border-style: solid;
+  border-color: #30363d;
+  color: var(--text);
+  font-weight: 500;
+}
+.copilot-connect-btn:hover { border-color: #6e7681; background: rgba(255,255,255,0.04); color: var(--text); }
+
+.copilot-connected {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.copilot-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+
+.copilot-user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.copilot-username {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.copilot-error {
+  font-size: 12px;
+  color: var(--red, #f85149);
+  margin: 0 0 8px;
+}

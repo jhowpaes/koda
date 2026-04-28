@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -322,12 +322,290 @@ const DEFAULT_KODA_CONFIG: KodaConfig = {
 
 type Tab = 'providers' | 'agents' | 'koda';
 
+// ── Claude Code constants ──────────────────────────────────────────────────────
+
+const CLAUDE_CODE_PROVIDER_ID = 'claude-code';
+const CLAUDE_CODE_BASE_URL    = 'https://api.anthropic.com';
+const CLAUDE_CODE_MODELS_STR  = 'claude-opus-4-7,claude-sonnet-4-6,claude-haiku-4-5-20251001';
+
+// ── ClaudeCodeSection component ────────────────────────────────────────────────
+
+function ClaudeCodeSection({ onProviderUpdated }: { onProviderUpdated: () => void }) {
+  const [status, setStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
+  const [info, setInfo]     = useState<{ emailAddress?: string; displayName?: string; organizationName?: string; billingType?: string } | null>(null);
+  const api = (window as any).api;
+
+  function applyStatus(s: any) {
+    if (s?.connected) {
+      setStatus('connected');
+      setInfo(s);
+      syncProvider(true, s);
+    } else {
+      setStatus('disconnected');
+      setInfo(null);
+      syncProvider(false);
+    }
+  }
+
+  useEffect(() => {
+    api.claudeCode.getStatus().then(applyStatus).catch(() => setStatus('disconnected'));
+
+    // Live-update when Claude Desktop switches accounts
+    api.claudeCode.onAccountChanged(applyStatus);
+    return () => api.claudeCode.offAccountChanged();
+  }, []);
+
+  function syncProvider(connected: boolean, s?: typeof info) {
+    const settings = loadSettings();
+    if (connected && s) {
+      const entry: LLMProvider = {
+        id:      CLAUDE_CODE_PROVIDER_ID,
+        name:    `Claude Code${s.displayName ? ` (${s.displayName})` : ''}`,
+        apiKey:  'claude-code-oauth',
+        baseUrl: CLAUDE_CODE_BASE_URL,
+        models:  CLAUDE_CODE_MODELS_STR,
+        enabled: true,
+      };
+      const existing = settings.providers.find(p => p.id === CLAUDE_CODE_PROVIDER_ID);
+      const providers = existing
+        ? settings.providers.map(p => p.id === CLAUDE_CODE_PROVIDER_ID ? entry : p)
+        : [entry, ...settings.providers];
+      localStorage.setItem('code-ai:settings', JSON.stringify({ ...settings, providers }));
+    } else {
+      const providers = settings.providers.filter(p => p.id !== CLAUDE_CODE_PROVIDER_ID);
+      localStorage.setItem('code-ai:settings', JSON.stringify({ ...settings, providers }));
+    }
+    onProviderUpdated();
+  }
+
+  function planLabel(billingType?: string) {
+    if (!billingType) return '';
+    if (billingType === 'stripe_subscription') return 'Pro';
+    if (billingType === 'claude_code') return 'Claude Code';
+    return billingType;
+  }
+
+  return (
+    <div className="provider-card copilot-card claude-code-card">
+      <div className="provider-header">
+        <span className="settings-section-title">
+          <svg width="14" height="14" viewBox="0 0 28 28" fill="currentColor" style={{ verticalAlign: 'middle', marginRight: 6 }}>
+            <path d="M14.0002 0C6.26863 0 0 6.26863 0 14.0002C0 21.7317 6.26863 28 14.0002 28C21.7317 28 28 21.7317 28 14.0002C28 6.26863 21.7317 0 14.0002 0Z"/>
+          </svg>
+          Claude Code
+        </span>
+        {status === 'connected' && <span className="copilot-badge">Conectado</span>}
+      </div>
+
+      {status === 'loading' && (
+        <p className="settings-hint">Verificando credenciais…</p>
+      )}
+
+      {status === 'disconnected' && (
+        <>
+          <p className="settings-hint" style={{ marginBottom: 8 }}>
+            Nenhuma conta Claude Code detectada. Faça login pelo app Claude Desktop ou pelo CLI:
+          </p>
+          <code className="copilot-code" style={{ fontSize: 13, letterSpacing: 1 }}>claude login</code>
+          <p className="settings-hint" style={{ marginTop: 8 }}>
+            Após fazer login, feche e reabra esta janela de configurações.
+          </p>
+        </>
+      )}
+
+      {status === 'connected' && info && (
+        <div className="copilot-connected">
+          <div className="claude-code-avatar">C</div>
+          <div className="copilot-user-info">
+            <span className="copilot-username">{info.displayName ?? info.emailAddress}</span>
+            <span className="settings-hint">
+              {info.emailAddress}
+              {info.billingType && ` · ${planLabel(info.billingType)}`}
+            </span>
+            <span className="settings-hint">Modelos: {CLAUDE_CODE_MODELS_STR.split(',').join(', ')}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── GitHub Copilot constants ───────────────────────────────────────────────────
+
+const COPILOT_PROVIDER_ID  = 'github-copilot';
+const COPILOT_BASE_URL     = 'https://api.githubcopilot.com';
+const COPILOT_MODELS_STR   = 'gpt-4o,gpt-4o-mini,o3-mini,claude-3.5-sonnet,claude-3.7-sonnet,gemini-2.0-flash';
+
+type CopilotStep = 'idle' | 'loading' | 'device' | 'polling' | 'connected' | 'error';
+
+interface DeviceInfo { userCode: string; verificationUri: string; deviceCode: string; interval: number }
+
+// ── CopilotSection component ──────────────────────────────────────────────────
+
+function CopilotSection({ onProviderUpdated }: { onProviderUpdated: () => void }) {
+  const [step, setStep]         = useState<CopilotStep>('idle');
+  const [device, setDevice]     = useState<DeviceInfo | null>(null);
+  const [username, setUsername] = useState<string | undefined>();
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>();
+  const [error, setError]       = useState<string>('');
+  const api = (window as any).api;
+
+  // Check connection on mount
+  useEffect(() => {
+    api.copilot.getStatus().then((s: any) => {
+      if (s?.connected) {
+        setStep('connected');
+        setUsername(s.username);
+        setAvatarUrl(s.avatarUrl);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const syncProvider = useCallback((connected: boolean, uname?: string) => {
+    const settings = loadSettings();
+    const existing = settings.providers.find(p => p.id === COPILOT_PROVIDER_ID);
+    if (connected) {
+      const entry: LLMProvider = {
+        id:      COPILOT_PROVIDER_ID,
+        name:    `GitHub Copilot${uname ? ` (${uname})` : ''}`,
+        apiKey:  'copilot-oauth',
+        baseUrl: COPILOT_BASE_URL,
+        models:  COPILOT_MODELS_STR,
+        enabled: true,
+      };
+      const providers = existing
+        ? settings.providers.map(p => p.id === COPILOT_PROVIDER_ID ? entry : p)
+        : [entry, ...settings.providers];
+      localStorage.setItem('code-ai:settings', JSON.stringify({ ...settings, providers }));
+    } else {
+      const providers = settings.providers.filter(p => p.id !== COPILOT_PROVIDER_ID);
+      localStorage.setItem('code-ai:settings', JSON.stringify({ ...settings, providers }));
+    }
+    onProviderUpdated();
+  }, [onProviderUpdated]);
+
+  async function startAuth() {
+    setError('');
+    setStep('loading');
+    try {
+      const info = await api.copilot.startAuth();
+      setDevice({ userCode: info.userCode, verificationUri: info.verificationUri, deviceCode: info.deviceCode, interval: info.interval });
+      setStep('device');
+      // Open browser automatically
+      window.open(info.verificationUri, '_blank');
+    } catch (e: any) {
+      setError(e.message ?? 'Erro ao iniciar autenticação');
+      setStep('error');
+    }
+  }
+
+  async function startPolling() {
+    if (!device) return;
+    setStep('polling');
+    const intervalMs = (device.interval + 1) * 1000;
+    const deadline = Date.now() + 15 * 60 * 1000; // 15 min
+
+    const poll = async (): Promise<void> => {
+      if (Date.now() > deadline) {
+        setError('Tempo expirado. Tente novamente.');
+        setStep('error');
+        return;
+      }
+      try {
+        const res = await api.copilot.pollAuth(device.deviceCode);
+        if (res.status === 'complete') {
+          setStep('connected');
+          setUsername(res.username);
+          setAvatarUrl(res.avatarUrl);
+          syncProvider(true, res.username);
+        } else if (res.status === 'expired') {
+          setError('Código expirado. Tente novamente.');
+          setStep('error');
+        } else {
+          setTimeout(poll, intervalMs);
+        }
+      } catch (e: any) {
+        setError(e.message ?? 'Erro ao verificar autenticação');
+        setStep('error');
+      }
+    };
+
+    setTimeout(poll, intervalMs);
+  }
+
+  async function logout() {
+    await api.copilot.logout();
+    setStep('idle');
+    setDevice(null);
+    setUsername(undefined);
+    setAvatarUrl(undefined);
+    syncProvider(false);
+  }
+
+  return (
+    <div className="provider-card copilot-card">
+      <div className="provider-header">
+        <span className="settings-section-title">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style={{ verticalAlign: 'middle', marginRight: 6 }}>
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+          GitHub Copilot
+        </span>
+        {step === 'connected' && (
+          <span className="copilot-badge">Conectado</span>
+        )}
+      </div>
+
+      {step === 'idle' || step === 'error' ? (
+        <>
+          {error && <p className="copilot-error">{error}</p>}
+          <p className="settings-hint" style={{ marginBottom: 10 }}>
+            Conecte sua conta GitHub com uma assinatura ativa do Copilot para usar os modelos via OAuth — sem precisar de API key.
+          </p>
+          <button className="settings-add-btn copilot-connect-btn" onClick={startAuth}>
+            Conectar com GitHub
+          </button>
+        </>
+      ) : step === 'loading' ? (
+        <p className="settings-hint">Iniciando fluxo OAuth…</p>
+      ) : step === 'device' ? (
+        <>
+          <p className="settings-hint">
+            1. Abra{' '}
+            <a href={device!.verificationUri} target="_blank" rel="noreferrer" className="copilot-link">
+              {device!.verificationUri}
+            </a>{' '}
+            no browser e insira o código abaixo:
+          </p>
+          <div className="copilot-code">{device!.userCode}</div>
+          <p className="settings-hint" style={{ marginTop: 8 }}>2. Após autorizar no browser, clique em continuar:</p>
+          <button className="settings-add-btn copilot-connect-btn" onClick={startPolling}>
+            Já autorizei, continuar
+          </button>
+        </>
+      ) : step === 'polling' ? (
+        <p className="settings-hint">Aguardando autorização no GitHub…</p>
+      ) : step === 'connected' ? (
+        <div className="copilot-connected">
+          {avatarUrl && <img src={avatarUrl} alt={username} className="copilot-avatar" />}
+          <div className="copilot-user-info">
+            <span className="copilot-username">@{username}</span>
+            <span className="settings-hint">Modelos: {COPILOT_MODELS_STR.split(',').join(', ')}</span>
+          </div>
+          <button className="provider-remove" onClick={logout} title="Desconectar">✕</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default memo(function SettingsModal({ onClose }: Props) {
   const [tab, setTab] = useState<Tab>('providers');
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
   const [agentDraft, setAgentDraft] = useState<Partial<AgentConfig>>({});
   const [generating, setGenerating] = useState(false);
+  const [copilotKey, setCopilotKey] = useState(0);
 
   // ── KODA routing ──────────────────────────────────────────────────────────
   const [kodaRouting, setKodaRouting] = useState<KodaRouting>(settings.kodaRouting ?? {});
@@ -511,7 +789,14 @@ Return ONLY the system prompt text, nothing else.`;
         <div className="settings-body">
           {tab === 'providers' && (
             <div className="settings-section">
-              {settings.providers.map(p => (
+              <ClaudeCodeSection
+                onProviderUpdated={() => setSettings(loadSettings())}
+              />
+              <CopilotSection
+                key={copilotKey}
+                onProviderUpdated={() => { setSettings(loadSettings()); setCopilotKey(k => k + 1); }}
+              />
+              {settings.providers.filter(p => p.id !== COPILOT_PROVIDER_ID && p.id !== CLAUDE_CODE_PROVIDER_ID).map(p => (
                 <div key={p.id} className="provider-card">
                   <div className="provider-header">
                     <input

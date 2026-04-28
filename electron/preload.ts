@@ -89,6 +89,23 @@ contextBridge.exposeInMainWorld('api', {
     saveHistory: (projectRoot: string, entry: unknown) => ipcRenderer.invoke('koda:saveHistory', { projectRoot, entry }),
   },
 
+  // ── Claude Code account ────────────────────────────────────────────────────
+  claudeCode: {
+    getStatus:        () => ipcRenderer.invoke('claudecode:auth:status'),
+    getToken:         () => ipcRenderer.invoke('claudecode:token:get'),
+    onAccountChanged: (cb: (status: any) => void) => ipcRenderer.on('claudecode:account:changed', (_, s) => cb(s)),
+    offAccountChanged: () => ipcRenderer.removeAllListeners('claudecode:account:changed'),
+  },
+
+  // ── GitHub Copilot OAuth ───────────────────────────────────────────────────
+  copilot: {
+    startAuth:  (clientId?: string) => ipcRenderer.invoke('copilot:auth:start', clientId),
+    pollAuth:   (deviceCode: string, clientId?: string) => ipcRenderer.invoke('copilot:auth:poll', { deviceCode, clientId }),
+    getStatus:  () => ipcRenderer.invoke('copilot:auth:status'),
+    logout:     () => ipcRenderer.invoke('copilot:auth:logout'),
+    getToken:   () => ipcRenderer.invoke('copilot:token:get'),
+  },
+
   // ── cli open path ─────────────────────────────────────────────────────────
   onOpenPath: (cb: (path: string) => void) => {
     ipcRenderer.on('app:openPath', (_, path) => cb(path));
