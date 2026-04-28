@@ -12,49 +12,208 @@ npm run desktop        # modo dev
 npm run dist:mac       # build .dmg para macOS
 ```
 
-### Painéis
+### Layout
 
-| Painel | O que faz |
+```
+┌──────┬──────────────────────┬──────────────────────────────────┐
+│      │                      │  Editor │ Browser │ Git          │
+│      │   Chat / KODA        │──────────────────────────────────│
+│ Rail │   (painel esquerdo)  │                                  │
+│      │                      │   Conteúdo da aba ativa          │
+│      │                      │                                  │
+└──────┴──────────────────────┴──────────────────────────────────┘
+```
+
+A largura do painel esquerdo é ajustável via drag (220px – 640px).
+
+---
+
+### WorkspaceRail
+
+Barra vertical à esquerda com navegação entre workspaces.
+
+| Elemento | Ação |
 |---|---|
-| **Editor** | CodeMirror 6, syntax highlighting para 15+ linguagens, salvar com `Cmd+S` |
-| **Git** | Stage/unstage, diff inline, commit com geração de mensagem via IA, push/pull |
-| **Chat** | Histórico de sessão persistente por workspace, contexto do codebase injetado automaticamente |
-| **KODA** | CEO agent: orquestra code/review/git agents em tarefas multi-step; toggle por workspace |
+| Círculo com iniciais | Alterna workspace ativo |
+| Badge com número | Quantidade de chats no workspace |
+| Ponto pulsante verde | CEO agent em execução neste workspace |
+| `+` | Cria novo workspace |
+| `⚡` | Alterna modo Chat ↔ KODA no workspace ativo |
+| `⚙` | Abre Settings |
+
+---
 
 ### Painel Chat
 
-O painel Chat é um chat conversacional com contexto automático do projeto. Cada workspace mantém seu próprio histórico de sessões (salvo em `.koda/chats.json` na raiz do projeto).
+Chat conversacional por workspace. Cada workspace suporta múltiplas sessões independentes, salvas em `.koda/chats.json` na raiz do projeto.
 
-**Funcionalidades:**
-- Contexto do codebase injetado automaticamente em cada mensagem (arquivos relevantes por heurística de keywords)
-- Histórico persistente por workspace — retoma de onde parou ao reabrir
-- Streaming de respostas em tempo real
-- Múltiplas sessões de chat por workspace
-- Referência a arquivos: use `@src/arquivo.ts` na mensagem para anexar o conteúdo do arquivo
+**Por sessão de chat:**
+- Seletor de modelo individual (provider ou agente customizado)
+- Dois modos de envio: **Chat** (histórico contínuo) e **Ask** (pergunta avulsa sem contexto)
+- Streaming de respostas em tempo real com indicador dinâmico ("Pensando…", "Trabalhando…", "Gerando resposta…")
+- Contexto do codebase injetado automaticamente em cada mensagem
+
+**Modo Agentic (Claude):**
+- Blocos de *thinking* expansíveis com tempo de raciocínio
+- Blocos de tool use em tempo real: `Read`, `Write`, `Run`, `Search`, `List`
+- Summary automático ao final: `✎ arquivos modificados`, `⚡ comandos`, `📄 leituras`, `🔍 buscas`
+
+**Ações no chat:**
+- `Enter` → envia mensagem; `Shift+Enter` → nova linha
+- `■` → interrompe streaming
+- Botões no header do arquivo aberto: **Explain**, **Review**, **Edit (AI)** — disparam ações direto no chat ativo
+
+---
 
 ### Painel KODA
 
-O painel KODA é o CEO agent integrado ao desktop. Cada workspace tem seu próprio toggle Chat ↔ KODA.
+CEO agent integrado ao desktop. Toggle por workspace via `⚡` na WorkspaceRail.
 
-**Como funciona:**
+**Fluxo manual:**
 
-1. Digite a tarefa no campo de input (ex: `"revisa src/auth.ts, corrige os bugs e commita"`)
-2. O CEO planeja automaticamente os steps necessários, mostrando complexidade (`simple` / `moderate` / `complex`)
-3. Cada step é executado em sequência com progresso visível — agente, tool e descrição
-4. O resultado de cada step alimenta o próximo automaticamente
-5. Ao finalizar, exibe um summary da execução
+1. Digite a tarefa no input (ex: `"revisa src/auth.ts, corrige os bugs e commita"`)
+2. O CEO gera um plano com complexidade indicada (`simple` / `moderate` / `complex`) e raciocínio
+3. Revise e clique **Executar** para confirmar
+4. Steps executados em sequência: agente → tool → resultado → próximo step
+5. Summary ao finalizar; botão **Nova tarefa** para recomeçar
+
+**Fluxo por voz:**
+
+1. Clique no orb `⚡` para ativar — diga **"KODA"** para acordar
+2. Diga a tarefa → transcrição automática via Whisper
+3. Plano gerado e lido em voz (TTS) — diga **"sim"** para executar ou **"não"** para cancelar
+4. Summary lido em voz ao concluir; volta a aguardar o próximo comando
+
+**Estados do orb:** `Aguardando "KODA"…` → `Ouvindo…` → `Transcrevendo…` → `Gerando plano…` → `Diga sim ou não…` → `Executando…`
 
 **Funcionalidades:**
-- Abas por agente (`code` / `review` / `git`) quando há múltiplos steps
-- Indicador de status por step: `○` pendente → spinner → `✓` concluído / `✕` erro
-- Botão **Stop** para interromper a qualquer momento
-- Entrada por voz via STT (🎤) — transcreve e preenche o campo automaticamente
-- Leitura do summary em voz via TTS ao concluir (configurável)
-- Badge de execução ativa na barra lateral (ponto pulsante por workspace)
+- Abas por agente (`code` / `review` / `git`) para filtrar steps
+- Status por step: `○` pendente → spinner → `✓` concluído / `✕` erro
+- Barra de progresso (steps concluídos / total)
+- **Stop** para interromper a qualquer momento
+- **Histórico** — lista de execuções anteriores com steps, resultados e summary, por projeto
 
-**Configuração de voz (Settings → ⚡ KODA):**
-- TTS: habilitar, API key OpenAI, voz (alloy/echo/fable/onyx/nova/shimmer), modelo (tts-1 / tts-1-hd), velocidade
-- STT: habilitar, API key OpenAI (Whisper)
+---
+
+### Aba Editor
+
+Divide-se em duas colunas: **File Tree** (esquerda) e **Editor** (direita).
+
+**File Tree:**
+- Expandir/colapsar pastas (clique no `▸`)
+- Badge colorida por tipo de arquivo (TS, JS, PY, JSON, MD, CSS, GO, RS, SQL, YAML, etc.)
+- Coloração Git no nome do arquivo: verde (Added), amarelo (Modified), vermelho (Deleted), rosa (Renamed), cinza (Untracked)
+- Ponto branco `•` se o arquivo tem alterações não salvas
+- Double-click → rename inline (Enter confirma, Escape cancela)
+- Botão `↺` para refresh da árvore
+
+**Editor:**
+- CodeMirror 6 com tema Dracula, line numbers, fold gutter, autocomplete, highlight de seleção
+- Syntax highlighting automático por extensão (15+ linguagens)
+- `Cmd+S` ou botão **Save** para salvar
+- Botão **Explain** → envia explicação do arquivo para o chat ativo
+- Botão **Review** → envia code review para o chat ativo
+- Botão **Edit (AI)** → abre prompt de instrução no chat para editar o arquivo via IA
+- Preview para arquivos de imagem (PNG, JPG, etc.)
+- Múltiplas abas abertas simultaneamente
+
+---
+
+### Aba Browser
+
+Executa o servidor de desenvolvimento e exibe o preview embutido.
+
+| Elemento | Descrição |
+|---|---|
+| Campo de comando | Comando a executar (padrão: `npm run dev`) |
+| **Run** / **Stop** | Inicia ou encerra o processo |
+| `⊟` | Mostra/oculta o terminal de output |
+| Campo de URL | URL do preview (padrão: `http://localhost:3000`) |
+| **Go** | Navega para a URL |
+| Terminal | stdout/stderr do processo com auto-scroll e auto-detect de porta |
+| iframe | Preview da aplicação em execução |
+
+A porta é detectada automaticamente a partir do output (`localhost:PORT`) e o preview atualiza sozinho.
+
+---
+
+### Aba Git
+
+| Seção | Funcionalidades |
+|---|---|
+| **Branch** | Dropdown para listar e trocar branches; `↓ Pull` e `↑ Push` |
+| **Changes** | Lista de arquivos com status (M/A/D/R/U); checkbox para stage/unstage; `↩` para descartar alterações |
+| **Commit** | Textarea para a mensagem; `✨ Generate with AI` para gerar via LLM; botão **Commit** |
+| **Recent commits** | Lista com hash e mensagem; clique para ver o diff do commit |
+| **Diff viewer** | Diff colorido do arquivo ou commit selecionado (verde = add, vermelho = remove) |
+
+---
+
+### DiffModal
+
+Abre automaticamente quando o agente propõe uma edição em arquivo via chat.
+
+- Exibe diff colorido (linhas adicionadas em verde, removidas em vermelho)
+- **Accept changes** → aplica a edição no arquivo
+- **Reject** → descarta a edição
+- Clique fora do modal → descarta
+
+---
+
+### Settings
+
+Aberto via `⚙` na WorkspaceRail. Três abas:
+
+#### AI Providers
+
+Gerencia os providers de LLM disponíveis no app. Providers padrão: OpenAI, Anthropic, Google Gemini, GLM/ZhipuAI.
+
+Por provider:
+- Nome (editável)
+- API Key (campo senha)
+- Base URL
+- Models (lista separada por vírgula)
+- Toggle **Enabled**
+- Botão para remover
+
+Botão **+ Add Provider** para adicionar providers customizados. Configurações salvas em `localStorage`.
+
+#### Agents
+
+Agentes customizados com system prompt próprio, disponíveis como opção de modelo no seletor do chat.
+
+Agentes padrão incluídos: Code Reviewer, Code Explainer, Refactor Pro, Test Writer, Software Engineer, Documentation Writer, Debug Detective, Security Analyst, Project Analyst.
+
+Por agente:
+- Nome
+- Modelo (dropdown dos providers habilitados)
+- System Prompt (textarea) + botão `✦ Generate with AI` para gerar via LLM
+- Skills (lista separada por vírgula)
+
+Botões **+ New Agent**, **Edit** e **Delete**. Configurações salvas em `localStorage`.
+
+#### ⚡ KODA
+
+Configurações compartilhadas com o CLI, salvas em `~/.koda/config.json`.
+
+**Model Routing** — modelo por agente CEO:
+
+| Agente | Configuração |
+|---|---|
+| Code Agent | Provider + Model |
+| Review Agent | Provider + Model |
+| Git Agent | Provider + Model |
+
+**Text-to-Speech (TTS):**
+- Toggle Enabled
+- API Key (OpenAI)
+- Voz: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`
+- Modelo: `tts-1` (rápido) ou `tts-1-hd` (alta qualidade)
+- Velocidade: 0.25× a 4.0×
+
+**Speech-to-Text (STT):**
+- Toggle Enabled
+- API Key (OpenAI — usa Whisper-1)
 
 ---
 
