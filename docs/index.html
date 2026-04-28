@@ -10,7 +10,7 @@
   <meta property="og:type" content="website" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -87,7 +87,7 @@
       gap: 10px;
       text-decoration: none;
     }
-    .nav-logo svg { width: 32px; height: 32px; border-radius: 8px; }
+    .nav-logo img { height: 40px; width: auto; }
     .nav-logo span {
       font-size: 18px;
       font-weight: 600;
@@ -158,11 +158,11 @@
       50%       { opacity: 0.5; transform: scale(0.85); }
     }
     .hero-logo {
-      width: 96px;
-      height: 96px;
-      border-radius: 24px;
+      width: 220px;
+      height: auto;
+      border-radius: 0;
       margin-bottom: 32px;
-      filter: drop-shadow(0 0 40px rgba(96,165,250,0.35));
+      filter: drop-shadow(0 0 50px rgba(96,165,250,0.4));
     }
     .hero h1 {
       font-size: clamp(40px, 7vw, 80px);
@@ -632,7 +632,7 @@
       nav { padding: 0 20px; }
       .nav-links { display: none; }
       .hero { padding: 100px 20px 60px; }
-      .hero-logo { width: 72px; height: 72px; }
+      .hero-logo { width: 160px; }
       .ceo-agents { grid-template-columns: 1fr; }
       .features-grid { grid-template-columns: 1fr; }
       footer { flex-direction: column; align-items: flex-start; }
@@ -646,31 +646,7 @@
 <!-- ── Nav ── -->
 <nav>
   <a href="#" class="nav-logo">
-    <svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="ng" x1="70" y1="195" x2="954" y2="829" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#60A5FA"/>
-          <stop offset="100%" stop-color="#A78BFA"/>
-        </linearGradient>
-        <filter id="nglow" x="-25%" y="-20%" width="150%" height="140%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="20" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-        <radialGradient id="nbg" cx="0.45" cy="0.42" r="0.6">
-          <stop offset="0%" stop-color="#141E30"/>
-          <stop offset="100%" stop-color="#0B0E17"/>
-        </radialGradient>
-      </defs>
-      <rect width="1024" height="1024" rx="224" fill="url(#nbg)"/>
-      <g filter="url(#nglow)">
-        <polyline points="180,330 70,512 180,694" fill="none" stroke="url(#ng)" stroke-width="26" stroke-linejoin="miter" stroke-linecap="round" opacity="0.55"/>
-        <rect x="226" y="212" width="90" height="600" fill="url(#ng)"/>
-        <polygon points="294,475 754,195 798,269 338,549" fill="url(#ng)"/>
-        <polygon points="338,475 798,755 754,829 294,549" fill="url(#ng)"/>
-        <polyline points="844,330 954,512 844,694" fill="none" stroke="url(#ng)" stroke-width="26" stroke-linejoin="miter" stroke-linecap="round" opacity="0.55"/>
-      </g>
-    </svg>
-    <span>KODA</span>
+    <img src="logo-bg.svg" alt="KODA" />
   </a>
   <ul class="nav-links">
     <li><a href="#features">Features</a></li>
@@ -694,30 +670,7 @@
     Desktop App + CLI — Any LLM
   </div>
 
-  <svg class="hero-logo" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="hg" x1="70" y1="195" x2="954" y2="829" gradientUnits="userSpaceOnUse">
-        <stop offset="0%" stop-color="#60A5FA"/>
-        <stop offset="100%" stop-color="#A78BFA"/>
-      </linearGradient>
-      <filter id="hglow" x="-25%" y="-20%" width="150%" height="140%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="20" result="blur"/>
-        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-      <radialGradient id="hbg" cx="0.45" cy="0.42" r="0.6">
-        <stop offset="0%" stop-color="#141E30"/>
-        <stop offset="100%" stop-color="#0B0E17"/>
-      </radialGradient>
-    </defs>
-    <rect width="1024" height="1024" rx="224" fill="url(#hbg)"/>
-    <g filter="url(#hglow)">
-      <polyline points="180,330 70,512 180,694" fill="none" stroke="url(#hg)" stroke-width="26" stroke-linejoin="miter" stroke-linecap="round" opacity="0.55"/>
-      <rect x="226" y="212" width="90" height="600" fill="url(#hg)"/>
-      <polygon points="294,475 754,195 798,269 338,549" fill="url(#hg)"/>
-      <polygon points="338,475 798,755 754,829 294,549" fill="url(#hg)"/>
-      <polyline points="844,330 954,512 844,694" fill="none" stroke="url(#hg)" stroke-width="26" stroke-linejoin="miter" stroke-linecap="round" opacity="0.55"/>
-    </g>
-  </svg>
+  <img class="hero-logo" src="logo-bg.svg" alt="KODA" loading="eager" />
 
   <h1>Your AI coding<br/><span class="grad">companion</span></h1>
   <p>Desktop app and CLI that understands your full codebase. Works with any OpenAI-compatible LLM — Claude, GPT-4o, Copilot, Groq, Ollama and more.</p>
@@ -961,23 +914,8 @@
 <!-- ── Footer ── -->
 <footer>
   <div style="display:flex;align-items:center;gap:10px">
-    <svg width="24" height="24" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" style="border-radius:6px">
-      <defs>
-        <linearGradient id="fg" x1="70" y1="195" x2="954" y2="829" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#60A5FA"/>
-          <stop offset="100%" stop-color="#A78BFA"/>
-        </linearGradient>
-        <radialGradient id="fbg" cx="0.45" cy="0.42" r="0.6">
-          <stop offset="0%" stop-color="#141E30"/>
-          <stop offset="100%" stop-color="#0B0E17"/>
-        </radialGradient>
-      </defs>
-      <rect width="1024" height="1024" rx="224" fill="url(#fbg)"/>
-      <rect x="226" y="212" width="90" height="600" fill="url(#fg)"/>
-      <polygon points="294,475 754,195 798,269 338,549" fill="url(#fg)"/>
-      <polygon points="338,475 798,755 754,829 294,549" fill="url(#fg)"/>
-    </svg>
-    <span>KODA · MIT License</span>
+    <img src="logo-bg.svg" alt="KODA" style="height:36px;width:auto;" />
+    <span>MIT License</span>
   </div>
   <div class="footer-links">
     <a href="https://github.com/rocketapps/code-ai">GitHub</a>
