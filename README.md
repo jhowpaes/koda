@@ -1,6 +1,6 @@
 # Koda
 
-Desktop app de AI para desenvolvimento. Entende o seu codebase completo via contexto de projeto e funciona com qualquer LLM compatível com a API OpenAI — GLM, OpenAI, Ollama e outros.
+Desktop app e CLI de AI para desenvolvimento. Entende o seu codebase completo via contexto de projeto e funciona com qualquer LLM compatível com a API OpenAI — GLM, OpenAI, Groq, Ollama e outros.
 
 ---
 
@@ -12,14 +12,14 @@ npm run desktop        # modo dev
 npm run dist:mac       # build .dmg para macOS
 ```
 
-### Funcionalidades
+### Painéis
 
 | Painel | O que faz |
 |---|---|
 | **Editor** | CodeMirror 6, syntax highlighting para 15+ linguagens, salvar com `Cmd+S` |
-| **Browser** | Roda o servidor do projeto embutido, auto-detecta porta, terminal colapsável |
 | **Git** | Stage/unstage, diff inline, commit com geração de mensagem via IA, push/pull |
-| **Chat** | Histórico de sessão persistente por projeto, contexto do codebase injetado automaticamente |
+| **Chat** | Histórico de sessão persistente por workspace, contexto do codebase injetado automaticamente |
+| **KODA** | CEO agent: orquestra code/review/git agents em tarefas multi-step; toggle por workspace |
 
 ---
 
@@ -28,24 +28,29 @@ npm run dist:mac       # build .dmg para macOS
 Ao abrir um projeto, o Koda:
 
 1. Detecta a raiz via `.git`
-2. Seleciona os arquivos mais relevantes por busca heurística de keywords
+2. Seleciona os arquivos mais relevantes por busca heurística de keywords (top 3 de até 300 arquivos)
 3. Injeta o `.aicontext` do projeto (se existir) em todo request
 
-Isso significa que o chat e os comandos entendem o projeto inteiro, não só o arquivo aberto.
+O contexto é construído a partir de:
+- `.aicontext` — convenções e arquivos-chave do projeto (prioridade máxima, até 3000 chars)
+- `package.json` — dependências detectadas automaticamente
+- Estrutura de pastas — scan até profundidade 2, excluindo `node_modules`, `dist`, `.git`
 
 ---
 
 ## Configuração
 
-### Variáveis de ambiente (`~/.ai/.env`)
+### Configuração global (`~/.koda/.env`)
 
 ```env
 LLM_API_KEY=sua_chave_aqui
-LLM_BASE_URL=https://api.z.ai/api/coding/paas/v4
-LLM_MODEL=glm-5.1
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o
 LLM_MAX_TOKENS=4096
 CONTEXT_BUDGET=12000
 ```
+
+> Execute `koda setup` para configurar de forma interativa.
 
 ### `.aicontext` — convenções do projeto
 
@@ -70,13 +75,14 @@ Crie na raiz do projeto. Injetado automaticamente em todo request ao LLM.
 
 ### `.aiconfig.json` — modelo por projeto
 
-Sobrescreve o modelo para um projeto específico. A API key nunca vai aqui.
+Sobrescreve o LLM para um projeto específico. Tem prioridade sobre as variáveis de ambiente. A API key nunca vai aqui.
 
 ```json
 {
-  "model": "glm-5.1",
-  "maxTokens": 4096,
-  "contextBudget": 12000
+  "model": "gpt-4o",
+  "baseURL": "https://api.openai.com/v1",
+  "maxTokens": 8192,
+  "contextBudget": 10000
 }
 ```
 
@@ -88,10 +94,78 @@ Qualquer provedor com API compatível com OpenAI funciona via `LLM_BASE_URL`:
 
 | Provedor | BASE_URL | Modelo |
 |---|---|---|
-| Z.ai (GLM) | `https://api.z.ai/api/coding/paas/v4` | `glm-5.1` |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+| Z.ai (GLM) | `https://api.z.ai/api/coding/paas/v4` | `glm-5.1` |
 | Groq | `https://api.groq.com/openai/v1` | `llama-3.1-70b-versatile` |
 | Ollama (local) | `http://localhost:11434/v1` | `llama3.2` |
+
+---
+
+## CLI
+
+```bash
+npm run link    # instala o comando `koda` globalmente
+koda setup      # configura API key e modelo
+```
+
+### Comandos individuais
+
+```bash
+koda ask "como funciona o sistema de autenticação?"
+koda edit src/api/checkout.ts -i "adicionar validação de input"
+koda review src/api/users.ts
+koda explain src/core/agent.ts
+koda commit
+koda run "adicionar middleware de autenticação JWT"
+koda chat
+koda chat --new    # nova sessão, limpa histórico
+```
+
+### CEO Agent — tarefas multi-step
+
+O `koda task` orquestra automaticamente os agentes de code, review e git para completar tarefas complexas:
+
+```bash
+koda task "revisa src/auth.ts, corrige os problemas e commita"
+koda task "cria testes para src/payments.ts e faz push"
+```
+
+O CEO planeja os passos necessários, executa cada agente na ordem certa e injeta o resultado de cada passo no próximo.
+
+### Abrir o app desktop
+
+```bash
+koda open                          # abre na pasta atual
+koda open ~/projects/meu-projeto   # abre em outra pasta
+```
+
+### Workspaces
+
+Workspaces isolam configuração de LLM e root por projeto. Cada workspace pode usar um modelo diferente para o CEO e para cada agente individual.
+
+```bash
+koda workspace new              # cria workspace interativamente
+koda workspace list             # lista todos os workspaces
+koda workspace use meu-projeto  # ativa um workspace
+koda workspace show             # detalhes do workspace ativo
+koda workspace delete <name>    # remove workspace
+```
+
+Config salva em `~/.koda/workspaces/<name>/config.json`.
+
+---
+
+## CEO Agent
+
+O CEO Agent orquestra 3 agentes especializados via protocolo MCP (stdio):
+
+| Agente | Tools disponíveis |
+|---|---|
+| **code** | `ask`, `edit_file`, `explain_file`, `review_file`, `run_task`, `run_command`, `commit` |
+| **review** | `review_file`, `review_diff`, `security_audit` |
+| **git** | `get_status`, `get_diff`, `commit`, `create_branch`, `push`, `get_log` |
+
+O CEO é minimalista: usa apenas os agentes e passos necessários para a tarefa (máximo 5 steps). O resultado de cada step é injetado automaticamente como contexto no step seguinte.
 
 ---
 
@@ -111,65 +185,47 @@ npm run gen-icon
 
 ```
 electron/
-  main.ts               → processo principal Electron
+  main.ts               → processo principal Electron + handlers IPC
   preload.ts            → bridge main ↔ renderer
   renderer/             → React app (UI)
 
 src/
-  cli/index.ts          → comandos CLI (ask, edit, review, commit, run, chat, setup)
+  cli/index.ts          → ponto de entrada único do CLI (koda)
+  ceo/
+    agent.ts            → CEO Agent: orquestra agentes via MCP
+    planner.ts          → geração de plano via LLM (CeoPlan)
+    cli.ts              → entry point legado do CEO (não usado como bin)
+  agents/
+    code.ts             → MCP server: agente de código
+    review.ts           → MCP server: agente de revisão
+    git.ts              → MCP server: agente git
   core/
-    agent.ts            → orquestrador principal
+    agent.ts            → agente principal (ask, edit, chat, review, commit)
     session-store.ts    → histórico persistente por projeto (~/.ai-sessions/)
   llm/
     provider.ts         → adapter OpenAI-compatible
-    cache.ts            → cache de respostas (~/.ai-cache/)
   context/
     builder.ts          → seleção heurística de arquivos por keyword
-    project.ts          → lê .aicontext, package.json, estrutura do projeto
+    project.ts          → lê .aicontext, .aiconfig.json, package.json
+  workspace/
+    store.ts            → CRUD de workspaces (~/.koda/workspaces/)
+    setup.ts            → setup interativo de workspace
+  mcp/
+    client.ts           → cliente MCP (stdio)
+    server.ts           → utilitário para criação de servidores MCP
   commands/
     review.ts           → code review
     explain.ts          → explicação de arquivo
     commit.ts           → geração de mensagem de commit
     run.ts              → agente autônomo com plano + confirmação
+  config.ts             → carrega config global (~/.koda/.env + .aiconfig.json)
 
 build/
   icon.svg              → ícone fonte (vetorial)
   icon.icns             → macOS (gerado via npm run gen-icon)
   icon.ico              → Windows (gerado via npm run gen-icon)
   icon.png              → Linux / electron-builder (gerado via npm run gen-icon)
-  scripts/gen-icon.sh   → script de geração dos ícones
-```
-
----
-
-## CLI (bônus)
-
-O Koda funciona como CLI em qualquer projeto via `koda`:
-
-```bash
-npm run link           # instala o comando `koda` globalmente
-koda setup             # configura API key e modelo
-
-# Comandos individuais
-koda ask "como funciona o sistema de pagamentos?"
-koda edit src/api/checkout.ts -i "adicionar validação de input"
-koda review src/api/users.ts
-koda commit
-koda run "adicionar middleware de autenticação JWT"
-koda chat
-
-# CEO agent — orquestra múltiplos agentes numa tarefa
-koda task "revisa src/auth.ts, corrige os problemas e commita"
-
-# Abre o app desktop na pasta atual (ou em outra pasta)
-koda open
-koda open ~/projects/meu-projeto
-
-# Workspaces
-koda workspace new
-koda workspace list
-koda workspace use meu-workspace
-koda workspace show
+  notarize.cjs          → hook de notarização macOS (requer env vars)
 ```
 
 ---
