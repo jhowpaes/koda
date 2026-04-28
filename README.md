@@ -21,6 +21,17 @@ npm run dist:mac       # build .dmg para macOS
 | **Chat** | Histórico de sessão persistente por workspace, contexto do codebase injetado automaticamente |
 | **KODA** | CEO agent: orquestra code/review/git agents em tarefas multi-step; toggle por workspace |
 
+### Painel Chat
+
+O painel Chat é um chat conversacional com contexto automático do projeto. Cada workspace mantém seu próprio histórico de sessões (salvo em `.koda/chats.json` na raiz do projeto).
+
+**Funcionalidades:**
+- Contexto do codebase injetado automaticamente em cada mensagem (arquivos relevantes por heurística de keywords)
+- Histórico persistente por workspace — retoma de onde parou ao reabrir
+- Streaming de respostas em tempo real
+- Múltiplas sessões de chat por workspace
+- Referência a arquivos: use `@src/arquivo.ts` na mensagem para anexar o conteúdo do arquivo
+
 ### Painel KODA
 
 O painel KODA é o CEO agent integrado ao desktop. Cada workspace tem seu próprio toggle Chat ↔ KODA.
@@ -132,7 +143,9 @@ npm run link    # instala o comando `koda` globalmente
 koda setup      # configura API key e modelo
 ```
 
-### Comandos individuais
+### Agente principal
+
+Os comandos individuais usam um agente único que seleciona automaticamente os arquivos mais relevantes do projeto e os injeta como contexto antes de cada chamada ao LLM. Histórico de sessão mantido por projeto (últimas 6 trocas).
 
 ```bash
 koda ask "como funciona o sistema de autenticação?"
@@ -141,9 +154,26 @@ koda review src/api/users.ts
 koda explain src/core/agent.ts
 koda commit
 koda run "adicionar middleware de autenticação JWT"
-koda chat
+```
+
+### Chat interativo
+
+```bash
+koda chat          # retoma a sessão anterior do projeto
 koda chat --new    # nova sessão, limpa histórico
 ```
+
+Comandos disponíveis dentro do chat:
+
+| Comando | O que faz |
+|---|---|
+| `/clear` | Limpa o histórico da sessão atual |
+| `/model <nome>` | Troca o modelo LLM sem sair do chat |
+| `/context` | Exibe o conteúdo do `.aicontext` carregado |
+| `/history` | Mostra quantas trocas há na sessão |
+| `/run <cmd>` | Executa um comando shell e envia o output ao LLM |
+| `/exit` | Encerra o chat |
+| `@src/arquivo.ts` | Anexa o conteúdo do arquivo à mensagem |
 
 ### CEO Agent — tarefas multi-step
 
