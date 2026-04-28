@@ -5,8 +5,7 @@
   "type": "module",
   "main": "out/main/index.cjs",
   "bin": {
-    "ai":   "./dist/index.js",
-    "koda": "./dist/ceo/cli.js"
+    "koda": "./dist/index.js"
   },
   "scripts": {
     "build": "tsup",

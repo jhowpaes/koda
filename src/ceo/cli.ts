@@ -192,7 +192,7 @@ if (workspace) {
   });
 } else {
   if (!config.apiKey) {
-    console.error(chalk.red('\nAPI key not set. Run `ai setup` or `koda workspace new`.\n'));
+    console.error(chalk.red('\nAPI key not set. Run `koda setup` or `koda workspace new`.\n'));
     process.exit(1);
   }
   provider = createProvider(config);

@@ -144,18 +144,32 @@ build/
 
 ## CLI (bônus)
 
-O Koda também funciona como CLI em qualquer projeto via `ai`:
+O Koda funciona como CLI em qualquer projeto via `koda`:
 
 ```bash
-npm run link           # instala o comando `ai` globalmente
-ai setup               # configura API key e modelo
+npm run link           # instala o comando `koda` globalmente
+koda setup             # configura API key e modelo
 
-ai ask "como funciona o sistema de pagamentos?"
-ai edit src/api/checkout.ts -i "adicionar validação de input"
-ai review src/api/users.ts
-ai commit
-ai run "adicionar middleware de autenticação JWT"
-ai chat
+# Comandos individuais
+koda ask "como funciona o sistema de pagamentos?"
+koda edit src/api/checkout.ts -i "adicionar validação de input"
+koda review src/api/users.ts
+koda commit
+koda run "adicionar middleware de autenticação JWT"
+koda chat
+
+# CEO agent — orquestra múltiplos agentes numa tarefa
+koda task "revisa src/auth.ts, corrige os problemas e commita"
+
+# Abre o app desktop na pasta atual (ou em outra pasta)
+koda open
+koda open ~/projects/meu-projeto
+
+# Workspaces
+koda workspace new
+koda workspace list
+koda workspace use meu-workspace
+koda workspace show
 ```
 
 ---

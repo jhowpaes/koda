@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { config } from '../config.js';
 import { createProvider } from '../llm/provider.js';
 import { Agent } from '../core/agent.js';
@@ -15,13 +15,25 @@ import { generateCommit } from '../commands/commit.js';
 import { runTask } from '../commands/run.js';
 import { clearSession } from '../core/session-store.js';
 import { projectRoot } from '../utils/git.js';
+import { CeoAgent } from '../ceo/agent.js';
+import type { ProgressEvent } from '../ceo/types.js';
+import {
+  listWorkspaces,
+  loadWorkspace,
+  getActive,
+  getActiveWorkspace,
+  setActive,
+  deleteWorkspace,
+} from '../workspace/store.js';
+import { createWorkspaceInteractive } from '../workspace/setup.js';
 
-// lazy init — setup command runs without API key
+// ─── Agent (lazy init) ────────────────────────────────────────────────────────
+
 let _agent: Agent | null = null;
 function getAgent(): Agent {
   if (!_agent) {
     if (!config.apiKey) {
-      console.error(chalk.red('\nAPI key not set. Run `ai setup` to configure.\n'));
+      console.error(chalk.red('\nAPI key not set. Run `koda setup` to configure.\n'));
       process.exit(1);
     }
     _agent = new Agent(createProvider(config), config.model);
@@ -35,11 +47,62 @@ function showProject() {
   process.stderr.write(chalk.dim(`  project: ${display}\n\n`));
 }
 
+// ─── CEO progress renderer ────────────────────────────────────────────────────
+
+function renderProgress(event: ProgressEvent): void {
+  switch (event.type) {
+    case 'plan': {
+      const complexityColor: Record<string, (s: string) => string> = {
+        simple:   chalk.green,
+        moderate: chalk.yellow,
+        complex:  chalk.red,
+      };
+      const cx = event.plan.complexity ?? 'moderate';
+      const colorFn = complexityColor[cx] ?? chalk.white;
+      console.log(chalk.bold.cyan('\nKODA Plan') + chalk.dim(` [${colorFn(cx)}]\n`));
+      if (event.plan.thinking) {
+        console.log(chalk.dim(`  ${event.plan.thinking}\n`));
+      }
+      event.plan.steps.forEach((s, i) => {
+        const tag = event.plan.parallel ? chalk.dim(' ∥') : '';
+        console.log(`  ${i + 1}. ${chalk.cyan(`[${s.agent}]`)} ${chalk.bold(s.tool)}${tag}`);
+        console.log(chalk.dim(`     ${s.description}`));
+      });
+      console.log();
+      break;
+    }
+    case 'step_start':
+      process.stdout.write(
+        chalk.dim(`[${event.index + 1}/${event.total}] `) +
+        chalk.cyan(`${event.step.agent} → ${event.step.tool}`) +
+        chalk.dim(` — ${event.step.description}`) + '\n'
+      );
+      break;
+    case 'step_done':
+      console.log(chalk.green('  ✓ Done'));
+      if (event.result && event.result.length < 400) {
+        console.log(chalk.dim(event.result.split('\n').map(l => `     ${l}`).join('\n')));
+      }
+      console.log();
+      break;
+    case 'step_error':
+      console.log(chalk.red(`  ✕ Error: ${event.error}\n`));
+      break;
+    case 'done':
+      console.log(chalk.bold.green('\n─── Summary ─────────────────────────────'));
+      console.log(event.summary);
+      console.log(chalk.bold.green('─────────────────────────────────────────\n'));
+      break;
+  }
+}
+
+// ─── Program ──────────────────────────────────────────────────────────────────
+
 const program = new Command();
 
 program
-  .name('ai')
-  .description('CLI AI Agent for codebases')
+  .name('koda')
+  .description('AI coding assistant — CLI, CEO agent and desktop app launcher')
   .version('0.2.0');
 
 // ─── setup ────────────────────────────────────────────────────────────────────
@@ -52,7 +115,7 @@ program
     const configFile = path.join(configDir, '.env');
     fs.mkdirSync(configDir, { recursive: true });
 
-    console.log(chalk.bold.cyan('\nAI Setup\n'));
+    console.log(chalk.bold.cyan('\nKoda Setup\n'));
 
     const existing = fs.existsSync(configFile)
       ? Object.fromEntries(
@@ -67,23 +130,42 @@ program
       chalk.cyan(`API Key${existing.LLM_API_KEY ? ` [current: ${existing.LLM_API_KEY.slice(0, 8)}...]` : ''}: `)
     );
     const baseURL = await promptUser(
-      chalk.cyan(`Base URL [${existing.LLM_BASE_URL ?? 'https://api.z.ai/api/coding/paas/v4'}]: `)
+      chalk.cyan(`Base URL [${existing.LLM_BASE_URL ?? 'https://api.openai.com/v1'}]: `)
     );
     const model = await promptUser(
-      chalk.cyan(`Model [${existing.LLM_MODEL ?? 'glm-5.1'}]: `)
+      chalk.cyan(`Model [${existing.LLM_MODEL ?? 'gpt-4o'}]: `)
     );
 
     const lines = [
       `LLM_API_KEY=${apiKey || (existing.LLM_API_KEY ?? '')}`,
-      `LLM_BASE_URL=${baseURL || (existing.LLM_BASE_URL ?? 'https://api.z.ai/api/coding/paas/v4')}`,
-      `LLM_MODEL=${model || (existing.LLM_MODEL ?? 'glm-5.1')}`,
+      `LLM_BASE_URL=${baseURL || (existing.LLM_BASE_URL ?? 'https://api.openai.com/v1')}`,
+      `LLM_MODEL=${model || (existing.LLM_MODEL ?? 'gpt-4o')}`,
       `LLM_MAX_TOKENS=4096`,
       `CONTEXT_BUDGET=12000`,
     ];
 
     fs.writeFileSync(configFile, lines.join('\n') + '\n');
     console.log(chalk.green(`\n✓ Saved to ${configFile}`));
-    console.log(chalk.dim('Run `ai chat` to get started.\n'));
+    console.log(chalk.dim('Run `koda chat` to get started.\n'));
+  });
+
+// ─── open ─────────────────────────────────────────────────────────────────────
+
+program
+  .command('open [path]')
+  .description('Open the Koda desktop app in the given folder (defaults to current directory)')
+  .action((p?: string) => {
+    const target = path.resolve(p ?? '.');
+    if (!fs.existsSync(target)) {
+      console.error(chalk.red(`Path not found: ${target}`));
+      process.exit(1);
+    }
+    // Try macOS app bundle first, fall back to generic open
+    const result = spawnSync('open', ['-a', 'Koda', '--args', '--open-path', target], { stdio: 'inherit' });
+    if (result.status !== 0) {
+      console.error(chalk.red('\nCould not open Koda app. Make sure it is installed in /Applications.\n'));
+      process.exit(1);
+    }
   });
 
 // ─── ask ──────────────────────────────────────────────────────────────────────
@@ -167,9 +249,124 @@ program
     await runTask(getAgent(), task);
   });
 
+// ─── task (CEO multi-agent) ───────────────────────────────────────────────────
+
+program
+  .command('task <description...>')
+  .description('Run a multi-step task using the CEO agent (orchestrates code/review/git agents)')
+  .action(async (parts: string[]) => {
+    const taskStr = parts.join(' ');
+    const workspace = getActiveWorkspace() ?? undefined;
+
+    let provider;
+    if (workspace) {
+      const { createProvider: cp } = await import('../llm/provider.js');
+      provider = cp({
+        apiKey:    workspace.ceo.apiKey,
+        baseURL:   workspace.ceo.baseURL ?? config.baseURL,
+        model:     workspace.ceo.model,
+        maxTokens: workspace.ceo.maxTokens ?? config.maxTokens,
+      });
+    } else {
+      if (!config.apiKey) {
+        console.error(chalk.red('\nAPI key not set. Run `koda setup` or `koda workspace new`.\n'));
+        process.exit(1);
+      }
+      provider = createProvider(config);
+    }
+
+    const activeName = getActive();
+    console.log(chalk.bold.cyan('\nKODA\n'));
+    if (activeName) console.log(chalk.dim(`Workspace: ${activeName}`));
+    console.log(chalk.dim(`Task: ${taskStr}\n`));
+    console.log(chalk.dim('Planning...\n'));
+
+    const ceo = new CeoAgent(provider, workspace);
+    try {
+      await ceo.run(taskStr, { onProgress: renderProgress });
+    } finally {
+      await ceo.close();
+    }
+  });
+
+// ─── workspace ────────────────────────────────────────────────────────────────
+
+const ws = program
+  .command('workspace')
+  .alias('ws')
+  .description('Manage workspaces');
+
+ws.command('new')
+  .alias('create')
+  .description('Create a new workspace (interactive)')
+  .action(async () => { await createWorkspaceInteractive(); });
+
+ws.command('list')
+  .alias('ls')
+  .description('List all workspaces')
+  .action(() => {
+    const names = listWorkspaces();
+    const active = getActive();
+    if (names.length === 0) {
+      console.log(chalk.dim('\nNo workspaces yet. Run: koda workspace new\n'));
+      return;
+    }
+    console.log(chalk.bold('\nWorkspaces:\n'));
+    for (const name of names) {
+      const w = loadWorkspace(name);
+      const isActive = name === active;
+      const marker = isActive ? chalk.green('● ') : chalk.dim('  ');
+      console.log(`${marker}${chalk.bold(name)}${isActive ? chalk.green(' (active)') : ''}`);
+      if (w) {
+        console.log(chalk.dim(`    root:  ${w.root}`));
+        console.log(chalk.dim(`    model: ${w.ceo.model}`));
+      }
+    }
+    console.log();
+  });
+
+ws.command('use <name>')
+  .alias('switch')
+  .description('Set active workspace')
+  .action((name: string) => {
+    setActive(name);
+    console.log(chalk.green(`\n✓ Active workspace: ${name}\n`));
+  });
+
+ws.command('show')
+  .alias('status')
+  .description('Show active workspace details')
+  .action(() => {
+    const active = getActive();
+    if (!active) {
+      console.log(chalk.dim('\nNo active workspace. Run: koda workspace new\n'));
+      return;
+    }
+    const w = loadWorkspace(active)!;
+    console.log(chalk.bold('\nActive workspace:\n'));
+    console.log(`  Name:     ${chalk.cyan(w.name)}`);
+    console.log(`  Root:     ${w.root}`);
+    console.log(`  Model:    ${w.ceo.model}`);
+    console.log(`  Provider: ${w.ceo.provider}`);
+    if (Object.keys(w.agents).length > 0) {
+      console.log(`  Agent overrides:`);
+      for (const [agent, cfg] of Object.entries(w.agents)) {
+        if (cfg) console.log(`    ${agent}: ${cfg.model ?? 'inherited'}`);
+      }
+    }
+    console.log();
+  });
+
+ws.command('delete <name>')
+  .alias('rm')
+  .description('Delete a workspace')
+  .action((name: string) => {
+    deleteWorkspace(name);
+    console.log(chalk.green(`\n✓ Workspace "${name}" deleted.\n`));
+  });
+
 // ─── chat helpers ─────────────────────────────────────────────────────────────
 
-// Detects @src/foo/bar.ts references, reads each file and appends content to message.
 function injectFileRefs(msg: string): { content: string; injected: string[] } {
   const injected: string[] = [];
   const appended: string[] = [];
@@ -190,7 +387,6 @@ function injectFileRefs(msg: string): { content: string; injected: string[] } {
   };
 }
 
-// Runs a shell command and returns { success, output } — never throws.
 function runShellCommand(cmd: string): { success: boolean; output: string } {
   try {
     const output = execSync(cmd, {
@@ -223,7 +419,7 @@ program
 
     const histLen = agent.getHistory().length;
 
-    console.log(chalk.bold.cyan('\nAI Chat'));
+    console.log(chalk.bold.cyan('\nKoda Chat'));
     showProject();
     if (histLen > 0) console.log(chalk.dim(`Resuming session (${histLen / 2} previous turns)`));
     console.log(chalk.dim('Commands: /clear  /model <name>  /context  /history  /run <cmd>  /exit'));
@@ -262,7 +458,6 @@ program
           loop(); return;
         }
 
-        // /run <cmd> — executes a shell command and sends output to the LLM
         if (msg.startsWith('/run ')) {
           const cmd = msg.slice(5).trim();
           if (!cmd) { loop(); return; }
@@ -271,19 +466,18 @@ program
           const icon = success ? chalk.green('✓') : chalk.red('✕');
           console.log(`${icon} ${output || '(no output)'}\n`);
           const context = `I ran \`${cmd}\`.\n\n${success ? 'Output' : 'Error'}:\n${output}`;
-          process.stdout.write(chalk.bold('ai › '));
+          process.stdout.write(chalk.bold('koda › '));
           await agent.chat(context);
           process.stdout.write('\n');
           loop(); return;
         }
 
-        // @file references — inject file content into the message before sending
         const { content, injected } = injectFileRefs(msg);
         if (injected.length > 0) {
           console.log(chalk.dim(`  Attached: ${injected.join(', ')}\n`));
         }
 
-        process.stdout.write(chalk.bold('\nai › '));
+        process.stdout.write(chalk.bold('\nkoda › '));
         await agent.chat(content);
         process.stdout.write('\n');
         loop();
