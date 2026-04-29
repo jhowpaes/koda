@@ -160,8 +160,8 @@ contextBridge.exposeInMainWorld('api', {
   saveKanban: (projectRoot: string, cards: unknown[]) => ipcRenderer.invoke('kanban:save', { projectRoot, cards }),
   proposeKanban: (projectRoot: string, cfg: { apiKey: string; baseUrl: string; model: string }) =>
     ipcRenderer.invoke('kanban:propose', { projectRoot, ...cfg }),
-  onKanbanCeoDone:     (cb: KanbanCeoDoneHandler)     => _kanbanDoneHandlers.add(cb),
-  offKanbanCeoDone:    (cb: KanbanCeoDoneHandler)     => _kanbanDoneHandlers.delete(cb),
-  onKanbanCeoProgress: (cb: KanbanCeoProgressHandler) => _kanbanProgressHandlers.add(cb),
-  offKanbanCeoProgress:(cb: KanbanCeoProgressHandler) => _kanbanProgressHandlers.delete(cb),
+  onKanbanCeoDone:     (cb: KanbanCeoDoneHandler)     => { _kanbanDoneHandlers.add(cb); },
+  offKanbanCeoDone:    (cb: KanbanCeoDoneHandler)     => { _kanbanDoneHandlers.delete(cb); },
+  onKanbanCeoProgress: (cb: KanbanCeoProgressHandler) => { _kanbanProgressHandlers.add(cb); },
+  offKanbanCeoProgress:(cb: KanbanCeoProgressHandler) => { _kanbanProgressHandlers.delete(cb); },
 });
