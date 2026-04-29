@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { loadSettings } from './SettingsModal';
 
 export type KanbanColumn = 'backlog' | 'next' | 'in-progress' | 'testing' | 'done';
@@ -15,6 +15,7 @@ export interface KanbanCard {
   tags?: string[];
   assignedTo?: 'ceo';
   error?: string;
+  ceoSummary?: string;
 }
 
 const COLUMNS: { key: KanbanColumn; label: string; accent: string }[] = [
@@ -51,6 +52,7 @@ interface Props {
 }
 
 export default function KanbanTab({ projectRoot }: Props) {
+  // ── card state ──────────────────────────────────────────────────────────────
   const [cards, setCards]         = useState<KanbanCard[]>([]);
   const [dragId, setDragId]       = useState<string | null>(null);
   const [dragOver, setDragOver]   = useState<KanbanColumn | null>(null);
@@ -59,39 +61,85 @@ export default function KanbanTab({ projectRoot }: Props) {
   const [newDesc, setNewDesc]     = useState('');
   const [newPri, setNewPri]       = useState<KanbanCard['priority']>('medium');
   const [editing, setEditing]     = useState<KanbanCard | null>(null);
+
+  // ── CEO queue state ─────────────────────────────────────────────────────────
   const [queueRunning, setQueueRunning] = useState(false);
   const [queueCardId, setQueueCardId]   = useState<string | null>(null);
   const [analyzing, setAnalyzing]       = useState(false);
-  const [toast, setToast]               = useState('');
+  const [ceoProgress, setCeoProgress]   = useState<Record<string, string>>({});
+  const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
 
-  const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cardsRef   = useRef<KanbanCard[]>([]);
-  const queueRef   = useRef<string[]>([]);
+  // ── filter state ────────────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery]     = useState('');
+  const [filterPriority, setFilterPriority] = useState<KanbanCard['priority'] | null>(null);
+  const [filterCreator, setFilterCreator]   = useState<'user' | 'agent' | null>(null);
+  const [filterAssigned, setFilterAssigned] = useState(false);
+  const [filterTag, setFilterTag]           = useState<string | null>(null);
 
-  // Keep cardsRef in sync with state
+  // ── feedback ────────────────────────────────────────────────────────────────
+  const [toast, setToast] = useState('');
+
+  // ── refs ────────────────────────────────────────────────────────────────────
+  const saveTimer          = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cardsRef           = useRef<KanbanCard[]>([]);
+  const queueRef           = useRef<string[]>([]);
+  const ceoSummaryCapture  = useRef<Record<string, string>>({});
+
   useEffect(() => { cardsRef.current = cards; }, [cards]);
 
-  // Load kanban on project change
+  // ── load on project change ──────────────────────────────────────────────────
+
   useEffect(() => {
     if (!projectRoot) return;
     setCards([]);
-    window.api.loadKanban(projectRoot).then(loaded => {
-      setCards(loaded as KanbanCard[]);
-    }).catch(() => setCards([]));
+    setSearchQuery('');
+    setFilterPriority(null);
+    setFilterCreator(null);
+    setFilterAssigned(false);
+    setFilterTag(null);
+    window.api.loadKanban(projectRoot)
+      .then(loaded => setCards(loaded as KanbanCard[]))
+      .catch(() => setCards([]));
   }, [projectRoot]);
 
-  // Subscribe to CEO done events for kanban cards
+  // ── CEO events ──────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!projectRoot) return;
 
+    const onProgress = ({ workspaceId, event }: { workspaceId: string; event: unknown }) => {
+      const cardId = workspaceId.slice('kanban-'.length);
+      const ev = event as Record<string, any>;
+
+      if (ev.type === 'step_start') {
+        setCeoProgress(prev => ({
+          ...prev,
+          [cardId]: `[${ev.step?.agent ?? '?'}] ${ev.step?.description ?? ''}`,
+        }));
+      } else if (ev.type === 'step_done' || ev.type === 'step_error') {
+        setCeoProgress(prev => { const n = { ...prev }; delete n[cardId]; return n; });
+      } else if (ev.type === 'done' && ev.summary) {
+        ceoSummaryCapture.current[cardId] = String(ev.summary);
+      }
+    };
+
     const onDone = ({ workspaceId, error }: { workspaceId: string; error?: string }) => {
       const cardId = workspaceId.slice('kanban-'.length);
+      const summary = ceoSummaryCapture.current[cardId];
+      delete ceoSummaryCapture.current[cardId];
+
+      setCeoProgress(prev => { const n = { ...prev }; delete n[cardId]; return n; });
 
       setCards(prev => {
         const updated = prev.map(c => {
           if (c.id !== cardId) return c;
           if (error) return { ...c, column: 'backlog' as KanbanColumn, error };
-          return { ...c, column: 'testing' as KanbanColumn, error: undefined };
+          return {
+            ...c,
+            column: 'testing' as KanbanColumn,
+            error: undefined,
+            ceoSummary: summary || undefined,
+          };
         });
         cardsRef.current = updated;
         persistNow(projectRoot, updated);
@@ -104,22 +152,23 @@ export default function KanbanTab({ projectRoot }: Props) {
         setQueueRunning(false);
         setQueueCardId(null);
       } else {
-        // Advance to next card in queue
         runNextInQueue(projectRoot);
       }
     };
 
+    window.api.onKanbanCeoProgress(onProgress);
     window.api.onKanbanCeoDone(onDone);
-    return () => { window.api.offKanbanCeoDone(onDone); };
+    return () => {
+      window.api.offKanbanCeoProgress(onProgress);
+      window.api.offKanbanCeoDone(onDone);
+    };
   }, [projectRoot]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── persistence ────────────────────────────────────────────────────────────
+  // ── persistence ─────────────────────────────────────────────────────────────
 
   function persistNow(root: string, updated: KanbanCard[]) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      window.api.saveKanban(root, updated);
-    }, 400);
+    saveTimer.current = setTimeout(() => window.api.saveKanban(root, updated), 400);
   }
 
   function updateCards(next: KanbanCard[]) {
@@ -127,29 +176,24 @@ export default function KanbanTab({ projectRoot }: Props) {
     if (projectRoot) persistNow(projectRoot, next);
   }
 
-  // ── toast helper ───────────────────────────────────────────────────────────
+  // ── toast ───────────────────────────────────────────────────────────────────
 
   function showToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(''), 4000);
   }
 
-  // ── CEO queue ──────────────────────────────────────────────────────────────
+  // ── CEO queue ───────────────────────────────────────────────────────────────
 
   async function startQueue() {
     if (!projectRoot || queueRunning) return;
-
-    const assigned = cardsRef.current.filter(
-      c => c.assignedTo === 'ceo' && c.column !== 'done' && c.column !== 'testing'
-    );
     const colOrder: KanbanColumn[] = ['next', 'in-progress', 'backlog'];
-    const sorted = [...assigned].sort(
-      (a, b) => colOrder.indexOf(a.column) - colOrder.indexOf(b.column)
-    );
+    const assigned = [...cardsRef.current.filter(
+      c => c.assignedTo === 'ceo' && c.column !== 'done' && c.column !== 'testing'
+    )].sort((a, b) => colOrder.indexOf(a.column) - colOrder.indexOf(b.column));
 
-    if (sorted.length === 0) { showToast('No cards assigned to CEO.'); return; }
-
-    queueRef.current = sorted.map(c => c.id);
+    if (!assigned.length) { showToast('No cards assigned to CEO.'); return; }
+    queueRef.current = assigned.map(c => c.id);
     setQueueRunning(true);
     runNextInQueue(projectRoot);
   }
@@ -167,8 +211,6 @@ export default function KanbanTab({ projectRoot }: Props) {
     if (!card) { runNextInQueue(root); return; }
 
     setQueueCardId(nextId);
-
-    // Move card to in-progress
     setCards(prev => {
       const updated = prev.map(c =>
         c.id === nextId ? { ...c, column: 'in-progress' as KanbanColumn, error: undefined } : c
@@ -178,7 +220,6 @@ export default function KanbanTab({ projectRoot }: Props) {
       return updated;
     });
 
-    // Plan the task first
     const planResult = await window.api.koda.plan(root, card.title);
     if (planResult.error || !planResult.plan) {
       setCards(prev => {
@@ -198,15 +239,7 @@ export default function KanbanTab({ projectRoot }: Props) {
       return;
     }
 
-    // Run without confirmation
-    window.api.koda.run(
-      `kanban-${nextId}`,
-      root,
-      card.title,
-      planResult.plan,
-      undefined,
-      loadSettings(),
-    );
+    window.api.koda.run(`kanban-${nextId}`, root, card.title, planResult.plan, undefined, loadSettings());
   }
 
   function stopQueue() {
@@ -218,7 +251,7 @@ export default function KanbanTab({ projectRoot }: Props) {
     showToast('Queue stopped.');
   }
 
-  // ── CEO propose ────────────────────────────────────────────────────────────
+  // ── CEO propose ─────────────────────────────────────────────────────────────
 
   async function proposeCards() {
     if (!projectRoot || analyzing) return;
@@ -228,10 +261,7 @@ export default function KanbanTab({ projectRoot }: Props) {
     setAnalyzing(true);
     try {
       const result = await window.api.proposeKanban(projectRoot, cfg);
-      if (result.error) {
-        showToast(result.error);
-        return;
-      }
+      if (result.error) { showToast(result.error); return; }
       const proposed = (result.cards ?? []) as KanbanCard[];
       if (!proposed.length) { showToast('No tasks proposed.'); return; }
       updateCards([...cardsRef.current, ...proposed]);
@@ -243,37 +273,35 @@ export default function KanbanTab({ projectRoot }: Props) {
     }
   }
 
-  // ── card CRUD ──────────────────────────────────────────────────────────────
+  // ── card CRUD ────────────────────────────────────────────────────────────────
 
   function addCard() {
     if (!newTitle.trim() || !addingTo) return;
-    const card: KanbanCard = {
-      id: uid(),
-      title: newTitle.trim(),
+    updateCards([...cards, {
+      id: uid(), title: newTitle.trim(),
       description: newDesc.trim() || undefined,
-      column: addingTo,
-      createdBy: 'user',
+      column: addingTo, createdBy: 'user',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       priority: newPri,
-    };
-    updateCards([...cards, card]);
-    setNewTitle('');
-    setNewDesc('');
-    setNewPri('medium');
-    setAddingTo(null);
+    }]);
+    setNewTitle(''); setNewDesc(''); setNewPri('medium'); setAddingTo(null);
   }
 
-  function deleteCard(id: string) {
-    updateCards(cards.filter(c => c.id !== id));
-  }
+  function deleteCard(id: string) { updateCards(cards.filter(c => c.id !== id)); }
 
   function toggleCeo(id: string) {
     updateCards(cards.map(c =>
-      c.id === id
-        ? { ...c, assignedTo: c.assignedTo === 'ceo' ? undefined : 'ceo' }
-        : c
+      c.id === id ? { ...c, assignedTo: c.assignedTo === 'ceo' ? undefined : 'ceo' } : c
     ));
+  }
+
+  function toggleSummary(id: string) {
+    setExpandedSummaries(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   }
 
   function saveEdit() {
@@ -284,7 +312,7 @@ export default function KanbanTab({ projectRoot }: Props) {
     setEditing(null);
   }
 
-  // ── drag & drop ────────────────────────────────────────────────────────────
+  // ── drag & drop ──────────────────────────────────────────────────────────────
 
   function onDragStart(e: React.DragEvent, id: string) {
     setDragId(id);
@@ -297,13 +325,43 @@ export default function KanbanTab({ projectRoot }: Props) {
     updateCards(cards.map(c =>
       c.id === dragId ? { ...c, column: col, updatedAt: new Date().toISOString() } : c
     ));
-    setDragId(null);
-    setDragOver(null);
+    setDragId(null); setDragOver(null);
   }
 
-  // ── counts ─────────────────────────────────────────────────────────────────
+  // ── filters ──────────────────────────────────────────────────────────────────
 
-  const assignedCount = cards.filter(c => c.assignedTo === 'ceo' && c.column !== 'done' && c.column !== 'testing').length;
+  const allTags = useMemo(() => {
+    const s = new Set<string>();
+    cards.forEach(c => c.tags?.forEach(t => s.add(t)));
+    return Array.from(s);
+  }, [cards]);
+
+  const visibleCards = useMemo(() => {
+    let r = cards;
+    const q = searchQuery.trim().toLowerCase();
+    if (q) r = r.filter(c =>
+      c.title.toLowerCase().includes(q) ||
+      (c.description ?? '').toLowerCase().includes(q)
+    );
+    if (filterPriority) r = r.filter(c => c.priority === filterPriority);
+    if (filterCreator)  r = r.filter(c => c.createdBy === filterCreator);
+    if (filterAssigned) r = r.filter(c => c.assignedTo === 'ceo');
+    if (filterTag)      r = r.filter(c => c.tags?.includes(filterTag));
+    return r;
+  }, [cards, searchQuery, filterPriority, filterCreator, filterAssigned, filterTag]);
+
+  const hasFilters = !!(searchQuery.trim() || filterPriority || filterCreator || filterAssigned || filterTag);
+
+  function clearFilters() {
+    setSearchQuery(''); setFilterPriority(null);
+    setFilterCreator(null); setFilterAssigned(false); setFilterTag(null);
+  }
+
+  // ── derived counts ───────────────────────────────────────────────────────────
+
+  const assignedCount = cards.filter(
+    c => c.assignedTo === 'ceo' && c.column !== 'done' && c.column !== 'testing'
+  ).length;
 
   if (!projectRoot) {
     return <div className="kanban-empty">Open a project to use the Kanban board.</div>;
@@ -311,7 +369,8 @@ export default function KanbanTab({ projectRoot }: Props) {
 
   return (
     <div className="kanban-root">
-      {/* Board header */}
+
+      {/* Header */}
       <div className="kanban-header">
         <span className="kanban-header-title">
           Tasks
@@ -329,15 +388,13 @@ export default function KanbanTab({ projectRoot }: Props) {
             {analyzing ? '⏳ Analyzing…' : '🔍 Analyze & Propose'}
           </button>
           {queueRunning ? (
-            <button className="kanban-header-btn danger" onClick={stopQueue} title="Stop CEO queue">
-              ■ Stop Queue
-            </button>
+            <button className="kanban-header-btn danger" onClick={stopQueue}>■ Stop Queue</button>
           ) : (
             <button
               className={`kanban-header-btn ceo${assignedCount === 0 ? ' disabled' : ''}`}
               onClick={startQueue}
               disabled={assignedCount === 0}
-              title={assignedCount === 0 ? 'Assign cards to CEO first' : `Run ${assignedCount} card${assignedCount > 1 ? 's' : ''} in sequence`}
+              title={assignedCount === 0 ? 'Assign cards to CEO first' : `Run ${assignedCount} card(s) in sequence`}
             >
               ▶ Run Queue{assignedCount > 0 ? ` (${assignedCount})` : ''}
             </button>
@@ -345,10 +402,57 @@ export default function KanbanTab({ projectRoot }: Props) {
         </div>
       </div>
 
-      {/* Board columns */}
+      {/* Filter bar */}
+      <div className="kanban-filter-bar">
+        <input
+          className="kanban-search"
+          placeholder="Search cards…"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+        />
+        <div className="kanban-filter-chips">
+          {(['high', 'medium', 'low'] as const).map(p => (
+            <button
+              key={p}
+              className={`kanban-filter-chip${filterPriority === p ? ' active' : ''}`}
+              style={{ '--chip-color': PRIORITY_COLOR[p] } as React.CSSProperties}
+              onClick={() => setFilterPriority(filterPriority === p ? null : p)}
+            >
+              {p}
+            </button>
+          ))}
+          <button
+            className={`kanban-filter-chip${filterCreator === 'agent' ? ' active' : ''}`}
+            onClick={() => setFilterCreator(filterCreator === 'agent' ? null : 'agent')}
+          >
+            🤖 AI
+          </button>
+          <button
+            className={`kanban-filter-chip${filterAssigned ? ' active' : ''}`}
+            onClick={() => setFilterAssigned(v => !v)}
+          >
+            CEO
+          </button>
+          {allTags.map(tag => (
+            <button
+              key={tag}
+              className={`kanban-filter-chip${filterTag === tag ? ' active' : ''}`}
+              onClick={() => setFilterTag(filterTag === tag ? null : tag)}
+            >
+              {tag}
+            </button>
+          ))}
+          {hasFilters && (
+            <button className="kanban-filter-clear" onClick={clearFilters}>✕ clear</button>
+          )}
+        </div>
+      </div>
+
+      {/* Board */}
       <div className="kanban-board">
         {COLUMNS.map(col => {
-          const colCards = cards.filter(c => c.column === col.key);
+          const colCards = visibleCards.filter(c => c.column === col.key);
+          const totalInCol = cards.filter(c => c.column === col.key).length;
           return (
             <div
               key={col.key}
@@ -360,12 +464,20 @@ export default function KanbanTab({ projectRoot }: Props) {
               <div className="kanban-col-header">
                 <span className="kanban-col-dot" style={{ background: col.accent }} />
                 <span className="kanban-col-title">{col.label}</span>
-                <span className="kanban-col-count">{colCards.length}</span>
+                <span className="kanban-col-count">
+                  {hasFilters && colCards.length !== totalInCol
+                    ? `${colCards.length}/${totalInCol}`
+                    : colCards.length}
+                </span>
               </div>
 
               <div className="kanban-cards">
                 {colCards.map(card => {
-                  const isRunning = queueCardId === card.id;
+                  const isRunning  = queueCardId === card.id;
+                  const stepText   = ceoProgress[card.id];
+                  const hasSummary = !!card.ceoSummary;
+                  const summaryOpen = expandedSummaries.has(card.id);
+
                   return (
                     <div
                       key={card.id}
@@ -396,9 +508,7 @@ export default function KanbanTab({ projectRoot }: Props) {
                             onClick={() => toggleCeo(card.id)}
                             title={card.assignedTo === 'ceo' ? 'Unassign from CEO' : 'Assign to CEO'}
                             disabled={isRunning}
-                          >
-                            🤖
-                          </button>
+                          >🤖</button>
                           <button className="kanban-card-btn" onClick={() => setEditing({ ...card })} title="Edit" disabled={isRunning}>✎</button>
                           <button className="kanban-card-btn danger" onClick={() => deleteCard(card.id)} title="Delete" disabled={isRunning}>✕</button>
                         </div>
@@ -408,16 +518,42 @@ export default function KanbanTab({ projectRoot }: Props) {
                         <p className="kanban-card-desc">{card.description}</p>
                       )}
 
+                      {/* CEO real-time step */}
+                      {stepText && (
+                        <p className="kanban-card-progress">⏳ {stepText}</p>
+                      )}
+
                       {card.error && (
-                        <p className="kanban-card-error" title={card.error}>
-                          ⚠ {card.error.slice(0, 80)}
-                        </p>
+                        <p className="kanban-card-error" title={card.error}>⚠ {card.error.slice(0, 80)}</p>
+                      )}
+
+                      {/* CEO summary (expandable) */}
+                      {hasSummary && (
+                        <div className="kanban-card-summary">
+                          <button
+                            className="kanban-summary-toggle"
+                            onClick={() => toggleSummary(card.id)}
+                          >
+                            {summaryOpen ? '▾' : '▸'} CEO summary
+                          </button>
+                          {summaryOpen && (
+                            <pre className="kanban-summary-text">{card.ceoSummary}</pre>
+                          )}
+                        </div>
                       )}
 
                       <div className="kanban-card-meta">
                         <div className="kanban-card-tags">
                           {card.tags?.map(tag => (
-                            <span key={tag} className="kanban-tag">{tag}</span>
+                            <span
+                              key={tag}
+                              className={`kanban-tag${filterTag === tag ? ' active' : ''}`}
+                              onClick={() => setFilterTag(filterTag === tag ? null : tag)}
+                              style={{ cursor: 'pointer' }}
+                              title="Filter by this tag"
+                            >
+                              {tag}
+                            </span>
                           ))}
                         </div>
                         <div className="kanban-card-meta-right">
@@ -442,10 +578,7 @@ export default function KanbanTab({ projectRoot }: Props) {
                     value={newTitle}
                     autoFocus
                     onChange={e => setNewTitle(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') addCard();
-                      if (e.key === 'Escape') setAddingTo(null);
-                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') addCard(); if (e.key === 'Escape') setAddingTo(null); }}
                   />
                   <textarea
                     className="kanban-input"
@@ -461,22 +594,16 @@ export default function KanbanTab({ projectRoot }: Props) {
                         className={`kanban-priority-btn${newPri === p ? ' active' : ''}`}
                         style={{ '--p-color': PRIORITY_COLOR[p] } as React.CSSProperties}
                         onClick={() => setNewPri(p)}
-                      >
-                        {p}
-                      </button>
+                      >{p}</button>
                     ))}
                   </div>
                   <div className="kanban-form-actions">
                     <button className="kanban-btn primary" onClick={addCard}>Add</button>
-                    <button className="kanban-btn" onClick={() => { setAddingTo(null); setNewTitle(''); setNewDesc(''); }}>
-                      Cancel
-                    </button>
+                    <button className="kanban-btn" onClick={() => { setAddingTo(null); setNewTitle(''); setNewDesc(''); }}>Cancel</button>
                   </div>
                 </div>
               ) : (
-                <button className="kanban-add-btn" onClick={() => setAddingTo(col.key)}>
-                  + Add card
-                </button>
+                <button className="kanban-add-btn" onClick={() => setAddingTo(col.key)}>+ Add card</button>
               )}
             </div>
           );
@@ -490,51 +617,34 @@ export default function KanbanTab({ projectRoot }: Props) {
             <h3 className="kanban-modal-title">Edit Card</h3>
 
             <label className="kanban-label">Title</label>
-            <input
-              className="kanban-input"
-              value={editing.title}
-              autoFocus
-              onChange={e => setEditing({ ...editing, title: e.target.value })}
-            />
+            <input className="kanban-input" value={editing.title} autoFocus
+              onChange={e => setEditing({ ...editing, title: e.target.value })} />
 
             <label className="kanban-label">Description</label>
-            <textarea
-              className="kanban-input"
-              value={editing.description ?? ''}
-              rows={4}
-              onChange={e => setEditing({ ...editing, description: e.target.value })}
-            />
+            <textarea className="kanban-input" value={editing.description ?? ''} rows={4}
+              onChange={e => setEditing({ ...editing, description: e.target.value })} />
 
             <label className="kanban-label">Priority</label>
             <div className="kanban-priority-row">
               {(['low', 'medium', 'high'] as const).map(p => (
-                <button
-                  key={p}
+                <button key={p}
                   className={`kanban-priority-btn${editing.priority === p ? ' active' : ''}`}
                   style={{ '--p-color': PRIORITY_COLOR[p] } as React.CSSProperties}
                   onClick={() => setEditing({ ...editing, priority: p })}
-                >
-                  {p}
-                </button>
+                >{p}</button>
               ))}
             </div>
 
             <label className="kanban-label">Column</label>
-            <select
-              className="kanban-input"
-              value={editing.column}
-              onChange={e => setEditing({ ...editing, column: e.target.value as KanbanColumn })}
-            >
+            <select className="kanban-input" value={editing.column}
+              onChange={e => setEditing({ ...editing, column: e.target.value as KanbanColumn })}>
               {COLUMNS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
 
             <label className="kanban-label">
-              <input
-                type="checkbox"
-                checked={editing.assignedTo === 'ceo'}
+              <input type="checkbox" checked={editing.assignedTo === 'ceo'}
                 onChange={e => setEditing({ ...editing, assignedTo: e.target.checked ? 'ceo' : undefined })}
-                style={{ marginRight: 6 }}
-              />
+                style={{ marginRight: 6 }} />
               Assign to CEO
             </label>
 
@@ -546,7 +656,6 @@ export default function KanbanTab({ projectRoot }: Props) {
         </div>
       )}
 
-      {/* Toast */}
       {toast && <div className="kanban-toast">{toast}</div>}
     </div>
   );

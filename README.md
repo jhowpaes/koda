@@ -151,7 +151,7 @@ A porta é detectada automaticamente a partir do output (`localhost:PORT`) e o p
 
 ### Aba Kanban
 
-Board de tarefas por workspace, salvo em `.koda/kanban.json` na raiz do projeto.
+Board de tarefas por workspace, salvo em `.koda/kanban.json` na raiz do projeto. Integrado ao CEO agent para execução automática de tarefas.
 
 **Colunas:**
 
@@ -159,24 +159,56 @@ Board de tarefas por workspace, salvo em `.koda/kanban.json` na raiz do projeto.
 |---|---|
 | **Backlog** | Tarefas identificadas mas ainda sem prioridade |
 | **Next** | Próximas a serem iniciadas |
-| **In Progress** | Em desenvolvimento ativo |
-| **Testing** | Aguardando validação ou testes |
+| **In Progress** | Em desenvolvimento ativo — preenchido automaticamente pelo CEO ao executar |
+| **Testing** | Aguardando validação; CEO move o card aqui ao concluir |
 | **Done** | Concluídas |
 
 **Cards:**
 
-Cada card possui título, descrição opcional, prioridade (`low` / `medium` / `high`) e origem (`user` ou `agent`). Cards criados pelos agentes de AI aparecem com ícone 🤖.
+Cada card possui título, descrição opcional, prioridade (`low` / `medium` / `high`), categoria/tags e origem (`user` ou `agent`). Cards criados pelo CEO aparecem com ícone 🤖 e tag de categoria (`bug` / `refactor` / `feature`).
 
-**Interações:**
+**Interações manuais:**
 
 | Ação | Como |
 |---|---|
 | Criar card | Clique **+ Add card** na coluna desejada; `Enter` confirma, `Esc` cancela |
 | Mover card | Arraste e solte (drag & drop) entre colunas |
-| Editar card | Clique **✎** no card — modal com título, descrição, prioridade e coluna |
+| Editar card | Clique **✎** no card — modal com título, descrição, prioridade, coluna e atribuição ao CEO |
 | Excluir card | Clique **✕** no card |
+| Filtrar por tag | Clique na tag do card para filtrar o board |
 
-**Persistência:** os cards são salvos automaticamente (debounce 400ms) em `.koda/kanban.json`. O arquivo é individual por projeto e pode ser versionado junto com o código.
+**CEO Analyze & Propose:**
+
+Botão **🔍 Analyze & Propose** no header. O CEO lê `package.json`, README e a árvore de arquivos do projeto, analisa o codebase e propõe automaticamente 6–12 tarefas categorizadas (bugs, refactors, features) diretamente no Backlog.
+
+**CEO Queue — execução automática:**
+
+1. Clique em 🤖 em cada card para atribuí-lo ao CEO
+2. Clique **▶ Run Queue (N)** — o CEO executa os cards em sequência (Next → In Progress → Backlog)
+3. O CEO planeja e executa cada tarefa automaticamente, sem confirmação
+4. Card em execução → coluna **In Progress**; concluído → **Testing**; falha → volta ao **Backlog** com mensagem de erro e a fila para
+
+**Progresso em tempo real:**
+
+Enquanto o CEO executa um card, o step atual é exibido diretamente no card:
+`⏳ [code] Refatorando src/auth.ts…`
+
+**CEO Summary:**
+
+Ao concluir um card, o CEO salva o summary da execução no card. Na coluna Testing/Done, clique **▸ CEO summary** para expandir e ver o que foi feito.
+
+**Filtros:**
+
+Barra de filtros abaixo do header:
+- Campo de busca por título e descrição
+- Chips de prioridade: `high` / `medium` / `low`
+- Filtro **🤖 AI** — cards criados pelo CEO
+- Filtro **CEO** — cards atribuídos ao CEO
+- Chips por categoria/tag (gerados automaticamente a partir das tags dos cards)
+- Contador `visível/total` por coluna quando filtros estão ativos
+- **✕ clear** para limpar todos os filtros
+
+**Persistência:** cards salvos automaticamente (debounce 400ms) em `.koda/kanban.json`. Inclui progresso, summaries e atribuições — o arquivo pode ser versionado junto com o código.
 
 ---
 
