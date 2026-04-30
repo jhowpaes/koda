@@ -9,10 +9,12 @@ permissions:
   contents: write
 
 jobs:
-  beta:
-    runs-on: macos-latest
+  version:
+    runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
-
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,9 +24,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - name: Compute beta version
+      - name: Compute beta version and push tag
         id: version
         run: |
           # Latest stable tag (ignores beta/alpha/rc tags)
@@ -66,8 +67,26 @@ jobs:
           echo "tag=$TAG"         >> $GITHUB_OUTPUT
           echo "Beta: $TAG (bump: $BUMP from $CURRENT)"
 
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+  build-mac:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
       - name: Set version in package.json for build
-        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+        run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version
 
       - name: Install dependencies
         run: npm ci
@@ -93,18 +112,83 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run dist:mac
 
-      - name: Tag and push
-        run: |
-          git tag "${{ steps.version.outputs.tag }}"
-          git push origin "${{ steps.version.outputs.tag }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-beta
+          path: |
+            release/*.dmg
+            release/*.dmg.blockmap
+
+  build-win:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set version in package.json for build
+        run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows
+        run: npm run dist:win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-beta
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+
+  build-linux:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set version in package.json for build
+        run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Linux
+        run: npm run dist:linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-beta
+          path: release/*.AppImage
+
+  publish:
+    needs: [version, build-mac, build-win, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release
 
       - name: Create prerelease on GitHub
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: "${{ steps.version.outputs.tag }}"
-          files: |
-            release/*.dmg
-            release/*.dmg.blockmap
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          files: release/*
           generate_release_notes: true
           prerelease: true
