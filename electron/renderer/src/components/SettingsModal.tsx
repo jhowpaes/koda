@@ -330,27 +330,30 @@ const CLAUDE_CODE_MODELS_STR  = 'claude-opus-4-7,claude-sonnet-4-6,claude-haiku-
 
 // ── ClaudeCodeSection component ────────────────────────────────────────────────
 
+type ClaudeLoginStep = 'idle' | 'waiting' | 'connected' | 'error';
+
 function ClaudeCodeSection({ onProviderUpdated }: { onProviderUpdated: () => void }) {
-  const [status, setStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
-  const [info, setInfo]     = useState<{ emailAddress?: string; displayName?: string; organizationName?: string; billingType?: string } | null>(null);
+  const [accountStatus, setAccountStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
+  const [loginStep, setLoginStep]         = useState<ClaudeLoginStep>('idle');
+  const [loginError, setLoginError]       = useState('');
+  const [info, setInfo]                   = useState<{ emailAddress?: string; displayName?: string; organizationName?: string; billingType?: string } | null>(null);
   const api = (window as any).api;
 
   function applyStatus(s: any) {
     if (s?.connected) {
-      setStatus('connected');
+      setAccountStatus('connected');
+      setLoginStep('connected');
       setInfo(s);
       syncProvider(true, s);
     } else {
-      setStatus('disconnected');
+      setAccountStatus('disconnected');
       setInfo(null);
       syncProvider(false);
     }
   }
 
   useEffect(() => {
-    api.claudeCode.getStatus().then(applyStatus).catch(() => setStatus('disconnected'));
-
-    // Live-update when Claude Desktop switches accounts
+    api.claudeCode.getStatus().then(applyStatus).catch(() => setAccountStatus('disconnected'));
     api.claudeCode.onAccountChanged(applyStatus);
     return () => api.claudeCode.offAccountChanged();
   }, []);
@@ -378,12 +381,28 @@ function ClaudeCodeSection({ onProviderUpdated }: { onProviderUpdated: () => voi
     onProviderUpdated();
   }
 
+  async function startLogin() {
+    setLoginError('');
+    setLoginStep('waiting');
+    const result = await api.claudeCode.login().catch(() => ({ ok: false, error: 'Falha ao iniciar login' }));
+    if (!result.ok) {
+      setLoginError(result.error ?? 'Erro ao iniciar login');
+      setLoginStep('error');
+      return;
+    }
+    // Token is in Keychain — refresh status directly (file watcher won't catch it)
+    const status = await api.claudeCode.getStatus().catch(() => null);
+    if (status) applyStatus(status);
+  }
+
   function planLabel(billingType?: string) {
     if (!billingType) return '';
     if (billingType === 'stripe_subscription') return 'Pro';
     if (billingType === 'claude_code') return 'Claude Code';
     return billingType;
   }
+
+  const isConnected = accountStatus === 'connected';
 
   return (
     <div className="provider-card copilot-card claude-code-card">
@@ -394,26 +413,32 @@ function ClaudeCodeSection({ onProviderUpdated }: { onProviderUpdated: () => voi
           </svg>
           Claude Code
         </span>
-        {status === 'connected' && <span className="copilot-badge">Conectado</span>}
+        {isConnected && <span className="copilot-badge">Conectado</span>}
       </div>
 
-      {status === 'loading' && (
+      {accountStatus === 'loading' && (
         <p className="settings-hint">Verificando credenciais…</p>
       )}
 
-      {status === 'disconnected' && (
+      {accountStatus === 'disconnected' && (loginStep === 'idle' || loginStep === 'error') && (
         <>
-          <p className="settings-hint" style={{ marginBottom: 8 }}>
-            Nenhuma conta Claude Code detectada. Faça login pelo app Claude Desktop ou pelo CLI:
+          {loginError && <p className="copilot-error">{loginError}</p>}
+          <p className="settings-hint" style={{ marginBottom: 10 }}>
+            Conecte sua conta Anthropic via OAuth — sem precisar de API key.
           </p>
-          <code className="copilot-code" style={{ fontSize: 13, letterSpacing: 1 }}>claude login</code>
-          <p className="settings-hint" style={{ marginTop: 8 }}>
-            Após fazer login, feche e reabra esta janela de configurações.
-          </p>
+          <button className="settings-add-btn copilot-connect-btn" onClick={startLogin}>
+            Fazer login com Claude
+          </button>
         </>
       )}
 
-      {status === 'connected' && info && (
+      {accountStatus === 'disconnected' && loginStep === 'waiting' && (
+        <p className="settings-hint">
+          Navegador aberto para autenticação. Aguardando você concluir o login…
+        </p>
+      )}
+
+      {isConnected && info && (
         <div className="copilot-connected">
           <div className="claude-code-avatar">C</div>
           <div className="copilot-user-info">
@@ -424,6 +449,15 @@ function ClaudeCodeSection({ onProviderUpdated }: { onProviderUpdated: () => voi
             </span>
             <span className="settings-hint">Modelos: {CLAUDE_CODE_MODELS_STR.split(',').join(', ')}</span>
           </div>
+          <button
+            className="copilot-disconnect-btn"
+            onClick={async () => {
+              await api.claudeCode.logout().catch(() => {});
+              applyStatus({ connected: false });
+            }}
+          >
+            Desconectar
+          </button>
         </div>
       )}
     </div>
