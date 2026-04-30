@@ -28,13 +28,19 @@ exports.default = async function afterSign(context) {
 
   console.log(`  • Notarizing ${appName} (${process.env.APPLE_TEAM_ID})…`);
 
-  await notarize({
-    tool: 'notarytool',
-    appPath,
-    appleId: process.env.APPLE_ID,
-    appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
-    teamId: process.env.APPLE_TEAM_ID,
-  });
+  const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+  await Promise.race([
+    notarize({
+      tool: 'notarytool',
+      appPath,
+      appleId: process.env.APPLE_ID,
+      appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
+      teamId: process.env.APPLE_TEAM_ID,
+    }),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Notarization timed out after 10 minutes')), TIMEOUT_MS)
+    ),
+  ]);
 
   console.log(`  • Notarization complete`);
 };
