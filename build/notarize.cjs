@@ -1,15 +1,8 @@
-/**
- * afterSign hook — notarizes the macOS app after code signing.
- *
- * Required environment variables (set in .env or CI secrets):
- *   APPLE_ID                    = your@appleid.com
- *   APPLE_APP_SPECIFIC_PASSWORD = <app-specific password from appleid.apple.com>
- *   APPLE_TEAM_ID               = <your Apple Developer Team ID>
- */
-
 require('dotenv').config({ path: require('path').resolve(__dirname, '../.env'), override: false });
 
-const { notarize } = require('@electron/notarize');
+const { spawnSync, execSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 exports.default = async function afterSign(context) {
@@ -17,7 +10,6 @@ exports.default = async function afterSign(context) {
 
   if (electronPlatformName !== 'darwin') return;
 
-  // Skip notarization when env vars are not set (e.g. local unsigned builds)
   if (!process.env.APPLE_ID || !process.env.APPLE_APP_SPECIFIC_PASSWORD) {
     console.log('  • Skipping notarization: APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD not set');
     return;
@@ -25,16 +17,32 @@ exports.default = async function afterSign(context) {
 
   const appName = packager.appInfo.productFilename;
   const appPath = path.join(appOutDir, `${appName}.app`);
+  const zipPath = path.join(os.tmpdir(), `${appName}-notarize.zip`);
 
-  console.log(`  • Notarizing ${appName} (${process.env.APPLE_TEAM_ID})…`);
+  console.log(`  • Zipping ${appPath} for notarization…`);
+  execSync(`ditto -c -k --keepParent "${appPath}" "${zipPath}"`, { stdio: 'inherit' });
 
-  await notarize({
-    tool: 'notarytool',
-    appPath,
-    appleId: process.env.APPLE_ID,
-    appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
-    teamId: process.env.APPLE_TEAM_ID,
-  });
+  console.log(`  • Submitting to Apple notarization (this streams output in real-time)…`);
+  const result = spawnSync(
+    'xcrun',
+    [
+      'notarytool', 'submit', zipPath,
+      '--apple-id', process.env.APPLE_ID,
+      '--password', process.env.APPLE_APP_SPECIFIC_PASSWORD,
+      '--team-id', process.env.APPLE_TEAM_ID,
+      '--wait',
+      '--timeout', '10m',
+    ],
+    { stdio: 'inherit', timeout: 11 * 60 * 1000 }
+  );
 
-  console.log(`  • Notarization complete`);
+  try { fs.unlinkSync(zipPath); } catch (_) {}
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`notarytool exited with code ${result.status}`);
+  }
+
+  console.log(`  • Stapling notarization ticket to ${appName}.app…`);
+  spawnSync('xcrun', ['stapler', 'staple', appPath], { stdio: 'inherit' });
 };
