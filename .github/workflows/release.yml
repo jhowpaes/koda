@@ -96,6 +96,11 @@ jobs:
             -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
           rm /tmp/certificate.p12
+          if ! security find-identity -v -p codesigning build.keychain | grep -q "Developer ID Application"; then
+            echo "::error::APPLE_CERTIFICATE must be a 'Developer ID Application' certificate, not 'Apple Distribution'. Export the correct cert from Keychain Access and update the secret."
+            security find-identity -v -p codesigning build.keychain
+            exit 1
+          fi
 
       - name: Build Mac (arm64 + x64)
         env:
