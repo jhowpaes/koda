@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import { X } from 'lucide-react';
 import CodeMirror from '@uiw/react-codemirror';
 import { dracula } from '@uiw/codemirror-theme-dracula';
 import { loadLanguage } from '@uiw/codemirror-extensions-langs';
@@ -416,7 +417,7 @@ export default memo(function EditorTab({ workspace, onFileAction, onOpenProject,
                     onClick={e => handleCloseTab(e, path)}
                     title="Close"
                   >
-                    ✕
+                    <X size={11} strokeWidth={2.5} />
                   </span>
                 </div>
               );

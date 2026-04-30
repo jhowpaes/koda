@@ -48,8 +48,13 @@ jobs:
             fi
           done <<< "$COMMITS"
 
-          # Compute next stable version from current package.json
-          CURRENT=$(node -p "require('./package.json').version" | sed 's/-.*//')
+          # Compute next stable version from the latest stable tag (not package.json,
+          # which may be behind on the develop branch)
+          if [ -z "$LAST_STABLE" ]; then
+            CURRENT="0.0.0"
+          else
+            CURRENT="${LAST_STABLE#v}"
+          fi
           IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
           if   [ "$BUMP" = "major" ]; then NEXT="$((MAJ+1)).0.0"
           elif [ "$BUMP" = "minor" ]; then NEXT="${MAJ}.$((MIN+1)).0"

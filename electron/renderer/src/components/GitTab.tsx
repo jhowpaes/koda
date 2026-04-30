@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ArrowDown, ArrowUp, RefreshCw } from 'lucide-react';
 import { loadSettings } from './SettingsModal';
 
 interface GitFile { xy: string; path: string }
@@ -206,9 +207,9 @@ export default function GitTab({ projectRoot }: Props) {
           )}
         </div>
         <div className="git-topbar-actions">
-          <button className="git-sync-btn" onClick={pull} disabled={syncing} title="Pull">↓ Pull</button>
-          <button className="git-sync-btn" onClick={push} disabled={syncing} title="Push">↑ Push</button>
-          <button className="git-sync-btn" onClick={refresh} title="Refresh">↺</button>
+          <button className="git-sync-btn" onClick={pull} disabled={syncing} title="Pull"><ArrowDown size={11} strokeWidth={2} /> Pull</button>
+          <button className="git-sync-btn" onClick={push} disabled={syncing} title="Push"><ArrowUp size={11} strokeWidth={2} /> Push</button>
+          <button className="git-sync-btn git-sync-icon-only" onClick={refresh} title="Refresh"><RefreshCw size={11} strokeWidth={2} /></button>
         </div>
       </div>
 
@@ -219,7 +220,7 @@ export default function GitTab({ projectRoot }: Props) {
         <div className="git-left">
           <div className="git-section-label">
             Changes ({files.length})
-            <button className="git-refresh-btn" onClick={refresh} title="Refresh">↺</button>
+            <button className="git-refresh-btn" onClick={refresh} title="Refresh"><RefreshCw size={11} strokeWidth={2} /></button>
           </div>
           <div className="git-files">
             {files.length === 0 && <div className="git-empty">No changes</div>}

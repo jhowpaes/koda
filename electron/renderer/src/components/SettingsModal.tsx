@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
+import { Settings, X, Mic, Server, Bot, Brain, Search, GitBranch, Volume2, Plus, Sparkles, Loader2 } from 'lucide-react';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -626,7 +627,7 @@ function CopilotSection({ onProviderUpdated }: { onProviderUpdated: () => void }
             <span className="copilot-username">@{username}</span>
             <span className="settings-hint">Modelos: {COPILOT_MODELS_STR.split(',').join(', ')}</span>
           </div>
-          <button className="provider-remove" onClick={logout} title="Desconectar">✕</button>
+          <button className="provider-remove" onClick={logout} title="Desconectar"><X size={12} strokeWidth={2.5} /></button>
         </div>
       ) : null}
     </div>
@@ -793,8 +794,8 @@ Return ONLY the system prompt text, nothing else.`;
       <div className="settings-modal">
         {/* header */}
         <div className="settings-header">
-          <span className="settings-title">⚙ Settings</span>
-          <button className="settings-close" onClick={onClose} title="Close">✕</button>
+          <span className="settings-title"><Settings size={15} strokeWidth={1.75} /> Settings</span>
+          <button className="settings-close" onClick={onClose} title="Close"><X size={16} strokeWidth={2} /></button>
         </div>
 
         {/* tabs */}
@@ -803,13 +804,13 @@ Return ONLY the system prompt text, nothing else.`;
             className={`settings-tab ${tab === 'providers' ? 'active' : ''}`}
             onClick={() => setTab('providers')}
           >
-            AI Providers
+            <Server size={12} strokeWidth={2} /> AI Providers
           </button>
           <button
             className={`settings-tab ${tab === 'agents' ? 'active' : ''}`}
             onClick={() => setTab('agents')}
           >
-            Agents
+            <Bot size={12} strokeWidth={2} /> Agents
           </button>
           <button
             className={`settings-tab ${tab === 'koda' ? 'active' : ''}`}
@@ -847,7 +848,7 @@ Return ONLY the system prompt text, nothing else.`;
                       />
                       Enabled
                     </label>
-                    <button className="provider-remove" onClick={() => removeProvider(p.id)} title="Remove provider">✕</button>
+                    <button className="provider-remove" onClick={() => removeProvider(p.id)} title="Remove provider"><X size={12} strokeWidth={2.5} /></button>
                   </div>
 
                   <div className="settings-field">
@@ -884,7 +885,7 @@ Return ONLY the system prompt text, nothing else.`;
                   </div>
                 </div>
               ))}
-              <button className="settings-add-btn" onClick={addProvider}>+ Add Provider</button>
+              <button className="settings-add-btn" onClick={addProvider}><Plus size={12} strokeWidth={2} /> Add Provider</button>
             </div>
           )}
 
@@ -936,7 +937,10 @@ Return ONLY the system prompt text, nothing else.`;
                         disabled={generating || !settings.providers.some(p => p.enabled && p.apiKey)}
                         title={settings.providers.some(p => p.enabled && p.apiKey) ? 'Generate with AI' : 'Configure a provider with an API key first'}
                       >
-                        {generating ? '⏳ Generating…' : '✦ Generate with AI'}
+                        {generating
+                          ? <><Loader2 size={10} strokeWidth={2} className="spin" /> Generating…</>
+                          : <><Sparkles size={10} strokeWidth={2} /> Generate with AI</>
+                        }
                       </button>
                     </div>
                     <textarea
@@ -987,7 +991,7 @@ Return ONLY the system prompt text, nothing else.`;
                       </div>
                     </div>
                   ))}
-                  <button className="settings-add-btn" onClick={startCreate}>+ New Agent</button>
+                  <button className="settings-add-btn" onClick={startCreate}><Plus size={12} strokeWidth={2} /> New Agent</button>
                 </>
               )}
             </div>
@@ -1001,16 +1005,16 @@ Return ONLY the system prompt text, nothing else.`;
               {/* Model Routing */}
               <div className="provider-card">
                 <div className="provider-header">
-                  <span className="settings-section-title">🧠 Model Routing</span>
+                  <span className="settings-section-title"><Brain size={13} strokeWidth={2} /> Model Routing</span>
                 </div>
                 <p className="settings-hint" style={{ marginBottom: 8 }}>
                   Assign specific models to each KODA agent. Leave empty to use the default provider.
                 </p>
 
                 {([
-                  { key: 'code'   as const, label: '⚡ Code Agent',   hint: 'Implementation, editing, file changes' },
-                  { key: 'review' as const, label: '🔍 Review Agent', hint: 'Code review, analysis, quality checks' },
-                  { key: 'git'    as const, label: '🌿 Git Agent',    hint: 'Commits, branches, push/pull' },
+                  { key: 'code'   as const, label: 'Code Agent',   hint: 'Implementation, editing, file changes' },
+                  { key: 'review' as const, label: 'Review Agent', hint: 'Code review, analysis, quality checks' },
+                  { key: 'git'    as const, label: 'Git Agent',    hint: 'Commits, branches, push/pull' },
                 ] as const).map(({ key, label, hint }) => {
                   const entry = kodaRouting[key];
                   const selectedProvider = settings.providers.find(p => p.id === entry?.providerId);
@@ -1021,7 +1025,12 @@ Return ONLY the system prompt text, nothing else.`;
                   return (
                     <div key={key} className="koda-routing-row">
                       <div className="koda-routing-label">
-                        <span>{label}</span>
+                        <span className="koda-routing-label-name">
+                          {key === 'code'   && <span>⚡</span>}
+                          {key === 'review' && <Search size={12} strokeWidth={2} />}
+                          {key === 'git'    && <GitBranch size={12} strokeWidth={2} />}
+                          {label}
+                        </span>
                         <span className="settings-hint">{hint}</span>
                       </div>
                       <div className="koda-routing-selects">
@@ -1069,7 +1078,7 @@ Return ONLY the system prompt text, nothing else.`;
               {/* TTS */}
               <div className="provider-card">
                 <div className="provider-header">
-                  <span className="settings-section-title">🔊 Text-to-Speech (TTS)</span>
+                  <span className="settings-section-title"><Volume2 size={13} strokeWidth={2} /> Text-to-Speech (TTS)</span>
                   <label className="toggle-label">
                     <input
                       type="checkbox"
@@ -1134,7 +1143,7 @@ Return ONLY the system prompt text, nothing else.`;
               {/* STT */}
               <div className="provider-card">
                 <div className="provider-header">
-                  <span className="settings-section-title">🎤 Speech-to-Text (STT)</span>
+                  <span className="settings-section-title"><Mic size={13} strokeWidth={2} /> Speech-to-Text (STT)</span>
                   <label className="toggle-label">
                     <input
                       type="checkbox"

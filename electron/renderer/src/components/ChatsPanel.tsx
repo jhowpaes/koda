@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { X, Plus } from 'lucide-react';
 import { Workspace, ChatSession, Message, ContentBlock } from '../App';
 import { loadSettings } from './SettingsModal';
 
@@ -329,7 +330,7 @@ function ChatCard({ chat, isStreaming, projectRoot, models, onDelete, onToggle, 
               </div>
             )}
           </div>
-          <button className="chat-close-btn" onClick={onDelete} title="Close chat">✕</button>
+          <button className="chat-close-btn" onClick={onDelete} title="Close chat"><X size={12} strokeWidth={2.5} /></button>
         </div>
       </div>
 
@@ -491,7 +492,7 @@ export default function ChatsPanel({
           {!workspace?.projectRoot && (
             <button className="panel-btn" onClick={onOpenProject}>Open folder</button>
           )}
-          <button className="panel-btn primary" onClick={onAddChat}>+ Chat</button>
+          <button className="panel-btn primary" onClick={onAddChat}><Plus size={12} strokeWidth={2.5} /> Chat</button>
         </div>
       </div>
 

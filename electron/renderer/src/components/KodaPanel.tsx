@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { History, ArrowLeft } from 'lucide-react';
 import type { KodaHistoryEntry } from '../App';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -663,7 +664,10 @@ export default function KodaPanel({ workspaceId: _workspaceId, projectRoot, koda
               onClick={() => setShowHistory(v => !v)}
               title="Histórico de execuções"
             >
-              {showHistory ? '← Voltar' : `⏱ Histórico${history.length ? ` (${history.length})` : ''}`}
+              {showHistory
+                ? <><ArrowLeft size={11} strokeWidth={2} /> Voltar</>
+                : <><History size={11} strokeWidth={2} /> {`Histórico${history.length ? ` (${history.length})` : ''}`}</>
+              }
             </button>
           )}
           {!showHistory && confirming && !isVoiceConfirming && (
