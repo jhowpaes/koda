@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Search, BookOpen, Pencil } from 'lucide-react';
 
 export interface FileNode {
   name: string;
@@ -49,13 +50,13 @@ function TreeNode({ node, depth, expanded, selectedPath, expandedPaths, onToggle
       {isSelected && node.type === 'file' && (
         <div className="file-actions" style={{ marginLeft: `${(depth + 1) * 12 + 8}px` }}>
           <button className="file-action-btn" onClick={() => onFileAction('explain', node.path)}>
-            📖 Explain
+            <BookOpen size={11} strokeWidth={2} /> Explain
           </button>
           <button className="file-action-btn" onClick={() => onFileAction('review', node.path)}>
-            🔍 Review
+            <Search size={11} strokeWidth={2} /> Review
           </button>
           <button className="file-action-btn" onClick={() => onFileAction('edit', node.path)}>
-            ✏️ Edit
+            <Pencil size={11} strokeWidth={2} /> Edit
           </button>
         </div>
       )}
