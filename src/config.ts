@@ -10,9 +10,12 @@ dotenv.config();
 
 const projectConfig = loadProjectConfig();
 
+const provider = (process.env.LLM_PROVIDER ?? 'openai-compatible') as 'openai-compatible' | 'anthropic';
+
 export const config = {
+  provider,
   apiKey: process.env.LLM_API_KEY ?? '',
-  baseURL: projectConfig.baseURL ?? process.env.LLM_BASE_URL ?? 'https://api.z.ai/api/coding/paas/v4',
+  baseURL: projectConfig.baseURL ?? process.env.LLM_BASE_URL ?? (provider === 'anthropic' ? undefined : 'https://api.z.ai/api/coding/paas/v4'),
   model: projectConfig.model ?? process.env.LLM_MODEL ?? 'glm-5.1',
   maxTokens: projectConfig.maxTokens ?? parseInt(process.env.LLM_MAX_TOKENS ?? '4096'),
   contextBudget: projectConfig.contextBudget ?? parseInt(process.env.CONTEXT_BUDGET ?? '12000'),
