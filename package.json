@@ -34,9 +34,10 @@
       "out/**/*",
       "!out/**/*.map"
     ],
-    "afterSign": "build/notarize.cjs",
+    "publish": "never",
     "mac": {
       "category": "public.app-category.developer-tools",
+      "afterSign": "build/notarize.cjs",
       "target": [
         {
           "target": "dmg",
