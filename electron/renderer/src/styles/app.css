@@ -133,6 +133,84 @@ html, body, #root {
 }
 .workspace-add-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* Close button — appears on hover, top-left corner */
+.workspace-close-btn {
+  position: absolute;
+  top: -5px; left: -5px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #3a3c46;
+  color: #aaa;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border: 1px solid #555;
+  user-select: none;
+}
+.workspace-btn:hover .workspace-close-btn { display: flex; }
+.workspace-close-btn:hover { background: #f85149; color: #fff; border-color: #f85149; }
+
+/* Close workspace confirmation modal */
+.ws-close-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.ws-close-modal {
+  background: #1e2028;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+  width: 320px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.ws-close-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+.ws-close-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 18px;
+  line-height: 1.5;
+}
+.ws-close-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.ws-close-cancel {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ws-close-cancel:hover { background: var(--hover-bg); color: var(--text); }
+.ws-close-confirm {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  background: #f85149;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ws-close-confirm:hover { background: #da3e37; }
+
 /* Running indicator dot on workspace button */
 .workspace-running-dot {
   position: absolute;

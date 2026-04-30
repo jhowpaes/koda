@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { Workspace } from '../App';
 
 interface Props {
@@ -7,6 +7,7 @@ interface Props {
   activeMode: 'chat' | 'koda';
   runningWorkspaceIds: Set<string>;
   onSelect: (id: string) => void;
+  onClose: (id: string) => void;
   onAdd: () => void;
   onToggleKoda: () => void;
   onOpenSettings: () => void;
@@ -31,8 +32,11 @@ function getInitials(name: string): string {
 
 export default memo(function WorkspaceRail({
   workspaces, activeId, activeMode, runningWorkspaceIds,
-  onSelect, onAdd, onToggleKoda, onOpenSettings,
+  onSelect, onClose, onAdd, onToggleKoda, onOpenSettings,
 }: Props) {
+  const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
+  const wsToClose = confirmCloseId ? workspaces.find(w => w.id === confirmCloseId) : null;
+
   return (
     <div className="workspace-rail">
       <div className="rail-drag-area" />
@@ -41,6 +45,7 @@ export default memo(function WorkspaceRail({
         const color = WS_COLORS[i % WS_COLORS.length];
         const isActive = ws.id === activeId;
         const isRunning = runningWorkspaceIds.has(ws.id);
+        const canClose = workspaces.length > 1 && !isRunning;
         return (
           <button
             key={ws.id}
@@ -55,6 +60,16 @@ export default memo(function WorkspaceRail({
             <span className="workspace-initials">{getInitials(ws.name)}</span>
             <span className="workspace-badge">{ws.chats.length}</span>
             {isRunning && <span className="workspace-running-dot" />}
+            {canClose && (
+              <span
+                className="workspace-close-btn"
+                role="button"
+                title={`Close ${ws.name}`}
+                onClick={e => { e.stopPropagation(); setConfirmCloseId(ws.id); }}
+              >
+                ×
+              </span>
+            )}
           </button>
         );
       })}
@@ -74,6 +89,26 @@ export default memo(function WorkspaceRail({
       <button className="rail-settings-btn" onClick={onOpenSettings} title="Settings">
         ⚙
       </button>
+
+      {confirmCloseId && wsToClose && (
+        <div className="ws-close-overlay" onClick={() => setConfirmCloseId(null)}>
+          <div className="ws-close-modal" onClick={e => e.stopPropagation()}>
+            <p className="ws-close-title">Close workspace?</p>
+            <p className="ws-close-desc">
+              <strong>{wsToClose.name}</strong> will be removed from the sidebar. Project files will not be affected.
+            </p>
+            <div className="ws-close-actions">
+              <button className="ws-close-cancel" onClick={() => setConfirmCloseId(null)}>Cancel</button>
+              <button
+                className="ws-close-confirm"
+                onClick={() => { onClose(confirmCloseId); setConfirmCloseId(null); }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
