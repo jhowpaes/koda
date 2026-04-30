@@ -63,8 +63,9 @@ jobs:
 
           git add package.json package-lock.json
           git commit -m "chore: bump version to $VERSION [skip ci]"
+          git push origin main
           git tag "$TAG"
-          git push origin main --follow-tags
+          git push origin "$TAG"
 
   build-mac:
     needs: version
