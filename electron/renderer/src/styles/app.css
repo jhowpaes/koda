@@ -57,9 +57,11 @@ html, body, #root {
 
 .resize-handle {
   width: 4px;
+  margin: 0 -2px;
   flex-shrink: 0;
   background: transparent;
   cursor: col-resize;
+  z-index: 10;
   transition: background 0.15s;
 }
 .resize-handle:hover, .resize-handle:active { background: var(--accent); }
@@ -275,9 +277,10 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
+  height: 44px;
   min-height: 44px;
   gap: 8px;
   flex-shrink: 0;
@@ -565,6 +568,7 @@ html, body, #root {
   border-bottom: 1px solid var(--border);
   background: var(--panel-bg);
   -webkit-app-region: drag;
+  height: 44px;
   min-height: 44px;
   align-items: flex-end;
   padding: 0 16px;
