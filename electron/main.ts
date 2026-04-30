@@ -1047,6 +1047,9 @@ function kodaStepMessage(
   if (step.args.query)       lines.push(`Consulta: ${step.args.query}`);
   if (step.args.task)        lines.push(`Tarefa: ${step.args.task}`);
   if (step.args.command)     lines.push(`Comando: ${step.args.command}`);
+  if (step.args.scope)       lines.push(`\n⚠️ ESCOPO DE PLATAFORMA: "${step.args.scope}" — pesquise e edite APENAS arquivos desta plataforma. Ignore completamente arquivos de outras plataformas.`);
+  if (step.args.newValue)    lines.push(`✅ NOVO VALOR A APLICAR: "${step.args.newValue}" — use exatamente este valor, não invente outro.`);
+  if (step.args.constraints) lines.push(`⚠️ RESTRIÇÕES: ${step.args.constraints}`);
   if (accumulatedContext) {
     lines.push(`\n--- Contexto dos passos anteriores (use para não re-pesquisar) ---\n${accumulatedContext}`);
   }
@@ -1175,8 +1178,8 @@ ipcMain.handle('koda:saveConfig', async (_, config: unknown) => {
 });
 
 ipcMain.handle('koda:plan', async (_, {
-  projectRoot, task, kodaWorkspace,
-}: { projectRoot: string; task: string; kodaWorkspace?: any }) => {
+  projectRoot, task, kodaWorkspace, settings,
+}: { projectRoot: string; task: string; kodaWorkspace?: any; settings?: any }) => {
   try {
     const { generatePlan } = await import('../src/ceo/planner.js');
     const { createProvider } = await import('../src/llm/provider.js');
@@ -1191,12 +1194,18 @@ ipcMain.handle('koda:plan', async (_, {
         maxTokens: kodaWorkspace.ceo.maxTokens ?? config.maxTokens,
       });
     } else {
-      if (!config.apiKey) return { error: 'API key not configured. Run `ai setup` first.' };
-      provider = createProvider(config);
+      const fallbackProvider = (settings?.providers as any[] | undefined)?.find((p: any) => p.enabled && p.apiKey);
+      const apiKey  = config.apiKey || fallbackProvider?.apiKey;
+      const baseUrl = config.baseURL || fallbackProvider?.baseUrl || '';
+      const model   = config.model || fallbackProvider?.models?.split(',')[0]?.trim() || '';
+      if (!apiKey) return { error: 'API key not configured. Run `ai setup` first.' };
+      provider = createProvider({ ...config, apiKey, baseURL: baseUrl, model });
     }
 
     const plan = await generatePlan(provider, task, projectRoot);
-    if (!plan || plan.steps.length === 0) return { error: 'Could not generate a plan. Try rephrasing the task.' };
+    if (!plan) return { error: 'Could not generate a plan. Try rephrasing the task.' };
+    if (plan.needsClarification) return { plan, needsClarification: true, clarificationQuestion: plan.clarificationQuestion };
+    if (plan.steps.length === 0) return { error: 'Could not generate a plan. Try rephrasing the task.' };
     return { plan };
   } catch (e) {
     return { error: (e as Error).message };
@@ -1223,14 +1232,15 @@ ipcMain.on('koda:run', async (event, {
       baseUrl = kodaWorkspace.ceo.baseURL ?? '';
       model   = kodaWorkspace.ceo.model;
     } else {
-      if (!config.apiKey) {
+      const fallbackProvider = (settings?.providers as any[] | undefined)?.find((p: any) => p.enabled && p.apiKey);
+      apiKey  = config.apiKey || fallbackProvider?.apiKey || '';
+      baseUrl = config.baseURL || fallbackProvider?.baseUrl || '';
+      model   = config.model  || fallbackProvider?.models?.split(',')[0]?.trim() || '';
+      if (!apiKey) {
         sender.send('koda:done', { workspaceId, error: 'API key not configured. Run `ai setup` first.' });
         kodaControllers.delete(workspaceId);
         return;
       }
-      apiKey  = config.apiKey;
-      baseUrl = config.baseURL ?? '';
-      model   = config.model;
     }
 
     // Emit plan so the KODA panel can still show the plan overview
@@ -1466,6 +1476,44 @@ ipcMain.handle('claudecode:auth:status', async () => {
 ipcMain.handle('claudecode:token:get', async () => {
   const { getValidToken } = await import('./claude-code-auth.js');
   return getValidToken();
+});
+
+ipcMain.handle('claudecode:logout', async (event) => {
+  try {
+    const jsonPath = path.join(os.homedir(), '.claude.json');
+    let json: any = {};
+    try { json = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')); } catch {}
+    delete json.oauthAccount;
+    fs.writeFileSync(jsonPath, JSON.stringify(json, null, 2), 'utf-8');
+  } catch {}
+  // Also clear from Keychain
+  try {
+    const { execSync } = await import('child_process');
+    execSync(`security delete-generic-password -s "Claude Code-credentials" 2>/dev/null || true`);
+  } catch {}
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('claudecode:account:changed', { connected: false });
+  }
+  return { ok: true };
+});
+
+ipcMain.handle('claudecode:login', async (event) => {
+  try {
+    const { startClaudeLogin } = await import('./claude-oauth.js');
+    await startClaudeLogin();
+    // Tokens are stored in Keychain (not ~/.claude.json), so the file watcher won't fire.
+    // Emit the account-changed event manually so the UI refreshes.
+    const { getStatus } = await import('./claude-code-auth.js');
+    const status = getStatus();
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('claudecode:account:changed', status);
+    }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: (e as Error).message };
+  }
 });
 
 // ─── IPC: GitHub Copilot OAuth ────────────────────────────────────────────────
