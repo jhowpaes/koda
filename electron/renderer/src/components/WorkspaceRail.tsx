@@ -93,17 +93,17 @@ export default memo(function WorkspaceRail({
       {confirmCloseId && wsToClose && (
         <div className="ws-close-overlay" onClick={() => setConfirmCloseId(null)}>
           <div className="ws-close-modal" onClick={e => e.stopPropagation()}>
-            <p className="ws-close-title">Fechar workspace?</p>
+            <p className="ws-close-title">Close workspace?</p>
             <p className="ws-close-desc">
-              <strong>{wsToClose.name}</strong> será removido da barra lateral. Os arquivos do projeto não serão alterados.
+              <strong>{wsToClose.name}</strong> will be removed from the sidebar. Project files will not be affected.
             </p>
             <div className="ws-close-actions">
-              <button className="ws-close-cancel" onClick={() => setConfirmCloseId(null)}>Cancelar</button>
+              <button className="ws-close-cancel" onClick={() => setConfirmCloseId(null)}>Cancel</button>
               <button
                 className="ws-close-confirm"
                 onClick={() => { onClose(confirmCloseId); setConfirmCloseId(null); }}
               >
-                Fechar
+                Close
               </button>
             </div>
           </div>
