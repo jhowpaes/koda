@@ -5,6 +5,7 @@ import RightPanel from './components/RightPanel';
 import DiffModal from './components/DiffModal';
 import SettingsModal, { loadSettings } from './components/SettingsModal';
 import KodaPanel, { type KodaState, type KodaProgressEvent, EMPTY_KODA_STATE } from './components/KodaPanel';
+import ProjectSetup from './components/ProjectSetup';
 
 export interface ContentBlock {
   type: 'thinking' | 'tool_use' | 'text';
@@ -1001,44 +1002,53 @@ export default function App() {
         onOpenSettings={() => setShowSettings(true)}
       />
 
-      <div className="chats-panel-wrap" style={{ width: chatsPanelWidth }}>
-        {isKodaMode ? (
-          <KodaPanel
-            workspaceId={activeWorkspaceId}
-            projectRoot={activeWorkspace?.projectRoot ?? null}
-            kodaState={activeKodaState}
-            history={activeKodaHistory}
-            onRun={handleKodaRun}
-            onConfirm={handleKodaConfirm}
-            onCancel={handleKodaCancel}
-            onStop={handleKodaStop}
-          />
-        ) : (
-          <ChatsPanel
+      {!activeWorkspace?.projectRoot ? (
+        <ProjectSetup
+          workspaceName={activeWorkspace?.name ?? 'Workspace'}
+          onOpenProject={openProject}
+        />
+      ) : (
+        <>
+          <div className="chats-panel-wrap" style={{ width: chatsPanelWidth }}>
+            {isKodaMode ? (
+              <KodaPanel
+                workspaceId={activeWorkspaceId}
+                projectRoot={activeWorkspace.projectRoot}
+                kodaState={activeKodaState}
+                history={activeKodaHistory}
+                onRun={handleKodaRun}
+                onConfirm={handleKodaConfirm}
+                onCancel={handleKodaCancel}
+                onStop={handleKodaStop}
+              />
+            ) : (
+              <ChatsPanel
+                workspace={activeWorkspace}
+                streamingChatIds={streamingChatIds}
+                onOpenProject={openProject}
+                onAddChat={addChat}
+                onDeleteChat={deleteChat}
+                onToggleExpand={toggleChatExpanded}
+                onSetModel={setChatModel}
+                onSendMessage={sendMessage}
+                onEditInstruction={handleEditInstruction}
+                onStop={(chatId: string) => { wasInterruptedChatIds.current.add(chatId); window.api.stopStreaming(chatId); }}
+              />
+            )}
+          </div>
+
+          <div className="resize-handle" onMouseDown={handleResizeStart} />
+
+          <MemoRightPanel
             workspace={activeWorkspace}
-            streamingChatIds={streamingChatIds}
+            onFileAction={handleFileAction}
             onOpenProject={openProject}
-            onAddChat={addChat}
-            onDeleteChat={deleteChat}
-            onToggleExpand={toggleChatExpanded}
-            onSetModel={setChatModel}
-            onSendMessage={sendMessage}
-            onEditInstruction={handleEditInstruction}
-            onStop={(chatId: string) => { wasInterruptedChatIds.current.add(chatId); window.api.stopStreaming(chatId); }}
+            onSelectFile={selectFile}
+            onCloseTab={closeTab}
+            onReloadTree={reloadFileTree}
           />
-        )}
-      </div>
-
-      <div className="resize-handle" onMouseDown={handleResizeStart} />
-
-      <MemoRightPanel
-        workspace={activeWorkspace}
-        onFileAction={handleFileAction}
-        onOpenProject={openProject}
-        onSelectFile={selectFile}
-        onCloseTab={closeTab}
-        onReloadTree={reloadFileTree}
-      />
+        </>
+      )}
 
       {activeDiffChat?.pendingDiff && (
         <DiffModal
