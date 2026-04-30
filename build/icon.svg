@@ -1,0 +1,60 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!--
+      Koda icon — <K>
+      Composition: left angle bracket + K lettermark + right angle bracket
+      Full-width gradient (blue → violet) applied to all elements from a single source.
+
+      K geometry (global coords, junction at y=512, arms ±300px):
+        vertical bar  : rect (226,212) → (316,812)
+        upper arm     : polygon 294,475 → 754,195 → 798,269 → 338,549
+        lower leg     : polygon 338,475 → 798,755 → 754,829 → 294,549
+      Angle brackets  : polylines at x=70 tip, arms to x=180 (left)
+                        and x=954 tip, arms to x=844 (right)
+    -->
+
+    <!-- Main gradient spanning the full <K> composition -->
+    <linearGradient id="mainGrad" x1="70" y1="195" x2="954" y2="829" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#60A5FA"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+
+    <!-- Soft glow bloom applied to the whole group -->
+    <filter id="glow" x="-25%" y="-20%" width="150%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="20" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Background subtle depth (slightly lighter center) -->
+    <radialGradient id="bgDepth" cx="0.45" cy="0.42" r="0.6">
+      <stop offset="0%"   stop-color="#141E30"/>
+      <stop offset="100%" stop-color="#0B0E17"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bgDepth)"/>
+
+  <!-- <K> composition -->
+  <g filter="url(#glow)">
+
+    <!-- Left angle bracket < -->
+    <polyline points="180,330 70,512 180,694"
+      fill="none" stroke="url(#mainGrad)" stroke-width="26"
+      stroke-linejoin="miter" stroke-linecap="round" opacity="0.55"/>
+
+    <!-- K lettermark (all in global coordinates, no transform) -->
+    <rect    x="226" y="212" width="90" height="600" fill="url(#mainGrad)"/>
+    <polygon points="294,475 754,195 798,269 338,549"  fill="url(#mainGrad)"/>
+    <polygon points="338,475 798,755 754,829 294,549"  fill="url(#mainGrad)"/>
+
+    <!-- Right angle bracket > -->
+    <polyline points="844,330 954,512 844,694"
+      fill="none" stroke="url(#mainGrad)" stroke-width="26"
+      stroke-linejoin="miter" stroke-linecap="round" opacity="0.55"/>
+
+  </g>
+</svg>
