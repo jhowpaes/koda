@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Play, Square, Terminal } from 'lucide-react';
 
 interface OutputLine { text: string; type: string }
 
@@ -59,7 +60,7 @@ export default function BrowserTab({ projectRoot }: Props) {
     <div className="browser-view">
       {/* start command bar */}
       <div className="browser-command-bar">
-        <span className="browser-label">▶</span>
+        <span className="browser-label"><Play size={12} strokeWidth={0} fill="currentColor" /></span>
         <input
           className="browser-command-input"
           value={command}
@@ -69,7 +70,7 @@ export default function BrowserTab({ projectRoot }: Props) {
           disabled={isRunning}
         />
         {isRunning ? (
-          <button className="browser-stop-btn" onClick={stop}>■ Stop</button>
+          <button className="browser-stop-btn" onClick={stop}><Square size={10} strokeWidth={0} fill="currentColor" /> Stop</button>
         ) : (
           <button className="browser-run-btn" onClick={run} disabled={!projectRoot}>
             Run
@@ -80,7 +81,7 @@ export default function BrowserTab({ projectRoot }: Props) {
           onClick={() => setShowTerminal(v => !v)}
           title="Toggle terminal output"
         >
-          ⊟
+          <Terminal size={13} strokeWidth={2} />
         </button>
       </div>
 

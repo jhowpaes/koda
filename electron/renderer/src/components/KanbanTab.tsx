@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Search, Play, X, Pencil, Trash2, TriangleAlert, Plus } from 'lucide-react';
 import { loadSettings } from './SettingsModal';
 
 export type KanbanColumn = 'backlog' | 'next' | 'in-progress' | 'testing' | 'done';
@@ -471,7 +472,7 @@ export default function KanbanTab({ projectRoot }: Props) {
             disabled={analyzing}
             title="Ask CEO to analyze project and propose tasks"
           >
-            {analyzing ? '⏳ Analyzing…' : '🔍 Analyze & Propose'}
+            {analyzing ? '⏳ Analyzing…' : <><Search size={13} strokeWidth={2} /> Analyze & Propose</>}
           </button>
           {queueRunning ? (
             <button className="kanban-header-btn danger" onClick={stopQueue}>■ Stop Queue</button>
@@ -482,7 +483,7 @@ export default function KanbanTab({ projectRoot }: Props) {
               disabled={assignedCount === 0}
               title={assignedCount === 0 ? 'Assign cards to CEO first' : `Run ${assignedCount} card(s) in sequence`}
             >
-              ▶ Run Queue{assignedCount > 0 ? ` (${assignedCount})` : ''}
+              <Play size={13} strokeWidth={2} /> Run Queue{assignedCount > 0 ? ` (${assignedCount})` : ''}
             </button>
           )}
         </div>
@@ -529,7 +530,7 @@ export default function KanbanTab({ projectRoot }: Props) {
             </button>
           ))}
           {hasFilters && (
-            <button className="kanban-filter-clear" onClick={clearFilters}>✕ clear</button>
+            <button className="kanban-filter-clear" onClick={clearFilters}><X size={11} strokeWidth={2.5} /> clear</button>
           )}
         </div>
       </div>
@@ -595,8 +596,8 @@ export default function KanbanTab({ projectRoot }: Props) {
                             title={card.assignedTo === 'ceo' ? 'Unassign from CEO' : 'Assign to CEO'}
                             disabled={isRunning}
                           >🤖</button>
-                          <button className="kanban-card-btn" onClick={() => setEditing({ ...card })} title="Edit" disabled={isRunning}>✎</button>
-                          <button className="kanban-card-btn danger" onClick={() => deleteCard(card.id)} title="Delete" disabled={isRunning}>✕</button>
+                          <button className="kanban-card-btn" onClick={() => setEditing({ ...card })} title="Edit" disabled={isRunning}><Pencil size={12} strokeWidth={2} /></button>
+                          <button className="kanban-card-btn danger" onClick={() => deleteCard(card.id)} title="Delete" disabled={isRunning}><Trash2 size={12} strokeWidth={2} /></button>
                         </div>
                       </div>
 
@@ -610,7 +611,7 @@ export default function KanbanTab({ projectRoot }: Props) {
                       )}
 
                       {card.error && (
-                        <p className="kanban-card-error" title={card.error}>⚠ {card.error.slice(0, 80)}</p>
+                        <p className="kanban-card-error" title={card.error}><TriangleAlert size={12} strokeWidth={2} /> {card.error.slice(0, 80)}</p>
                       )}
 
                       {/* CEO clarification request */}
@@ -711,7 +712,7 @@ export default function KanbanTab({ projectRoot }: Props) {
                   </div>
                 </div>
               ) : (
-                <button className="kanban-add-btn" onClick={() => setAddingTo(col.key)}>+ Add card</button>
+                <button className="kanban-add-btn" onClick={() => setAddingTo(col.key)}><Plus size={13} strokeWidth={2} /> Add card</button>
               )}
             </div>
           );

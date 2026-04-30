@@ -21,7 +21,7 @@
   --code-bg: #161b22;
   --user-msg-bg: #1f2937;
   --scrollbar: #30363d;
-  --rail-w: 56px;
+  --rail-w: 84px;
 }
 
 html, body, #root {
@@ -79,17 +79,17 @@ html, body, #root {
   user-select: none;
 }
 
-.rail-drag-area { height: 38px; width: 100%; flex-shrink: 0; -webkit-app-region: drag; }
+.rail-drag-area { height: 44px; width: 100%; flex-shrink: 0; -webkit-app-region: drag; }
 
 .workspace-btn {
   position: relative;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   background: var(--hover-bg);
   border: 1px solid transparent;
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   display: flex;
@@ -100,18 +100,18 @@ html, body, #root {
   flex-shrink: 0;
 }
 .workspace-btn:hover { background: var(--active-bg); }
-.workspace-btn.active { border-radius: 10px; color: #fff; }
+.workspace-btn.active { border-radius: 12px; color: #fff; }
 
-.workspace-initials { font-size: 10px; font-weight: 700; line-height: 1; }
+.workspace-initials { font-size: 12px; font-weight: 700; line-height: 1; }
 
 .workspace-badge {
   position: absolute;
   bottom: -4px; right: -4px;
-  min-width: 15px; height: 15px;
+  min-width: 16px; height: 16px;
   border-radius: 8px;
   background: #2a2c35;
   color: var(--text-dim);
-  font-size: 8px; font-weight: 700;
+  font-size: 9px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
   padding: 0 3px;
   border: 1px solid var(--border);
@@ -120,12 +120,12 @@ html, body, #root {
 
 .workspace-add-btn {
   margin-top: 2px;
-  width: 34px; height: 34px;
-  border-radius: 8px;
+  width: 44px; height: 44px;
+  border-radius: 10px;
   background: none;
   border: 1px dashed #383c44;
   color: var(--text-dim);
-  font-size: 18px;
+  font-size: 20px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: border-color 0.15s, color 0.15s;
@@ -136,8 +136,8 @@ html, body, #root {
 /* Close button — appears on hover, top-left corner */
 .workspace-close-btn {
   position: absolute;
-  top: -5px; left: -5px;
-  width: 14px; height: 14px;
+  top: -4px; left: -4px;
+  width: 16px; height: 16px;
   border-radius: 50%;
   background: #3a3c46;
   color: #aaa;
@@ -230,12 +230,12 @@ html, body, #root {
 
 /* KODA toggle button in rail */
 .rail-koda-btn {
-  width: 34px; height: 34px;
-  border-radius: 8px;
+  width: 44px; height: 44px;
+  border-radius: 10px;
   background: none;
   border: 1px solid transparent;
   color: var(--text-dim);
-  font-size: 15px;
+  font-size: 20px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -246,12 +246,12 @@ html, body, #root {
 .rail-koda-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 .rail-settings-btn {
-  width: 34px; height: 34px;
-  border-radius: 8px;
+  width: 44px; height: 44px;
+  border-radius: 10px;
   background: none;
   border: 1px solid transparent;
   color: var(--text-dim);
-  font-size: 15px;
+  font-size: 0;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: background 0.15s, color 0.15s;
@@ -278,7 +278,7 @@ html, body, #root {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
-  min-height: 42px;
+  min-height: 44px;
   gap: 8px;
   flex-shrink: 0;
 }
@@ -303,6 +303,7 @@ html, body, #root {
   font-size: 11px;
   cursor: pointer; white-space: nowrap;
   transition: background 0.15s, color 0.15s;
+  display: inline-flex; align-items: center; gap: 4px;
 }
 .panel-btn:hover { background: var(--active-bg); color: var(--text); }
 .panel-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -546,6 +547,7 @@ html, body, #root {
   border-radius: 50%; animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.8s linear infinite; }
 
 /* ── right panel ─────────────────────────────────────────────────────────── */
 
@@ -563,7 +565,7 @@ html, body, #root {
   border-bottom: 1px solid var(--border);
   background: var(--panel-bg);
   -webkit-app-region: drag;
-  min-height: 42px;
+  min-height: 44px;
   align-items: flex-end;
   padding: 0 16px;
   flex-shrink: 0;
@@ -687,6 +689,7 @@ html, body, #root {
   border: 1px solid var(--border); border-radius: 3px;
   color: var(--text-dim); font-size: 11px; cursor: pointer;
   transition: background 0.15s, color 0.15s;
+  display: inline-flex; align-items: center; gap: 4px;
 }
 .file-action-btn:hover { background: var(--active-bg); color: var(--text); }
 .file-action-btn.explain:hover { color: var(--cyan); border-color: var(--cyan); }
@@ -803,7 +806,7 @@ html, body, #root {
   padding: 7px 12px; border-bottom: 1px solid var(--border);
   background: var(--panel-bg); flex-shrink: 0;
 }
-.browser-label { color: var(--text-dim); font-size: 12px; flex-shrink: 0; }
+.browser-label { display: flex; align-items: center; color: var(--text-dim); font-size: 12px; flex-shrink: 0; }
 .browser-command-input {
   flex: 1; background: var(--hover-bg);
   border: 1px solid var(--border); border-radius: 4px;
@@ -813,6 +816,7 @@ html, body, #root {
 .browser-command-input:disabled { opacity: 0.6; }
 
 .browser-run-btn {
+  display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 12px; background: #1a4731; border: 1px solid var(--green);
   border-radius: 4px; color: var(--green); font-size: 12px; cursor: pointer;
   white-space: nowrap; transition: background 0.15s;
@@ -821,6 +825,7 @@ html, body, #root {
 .browser-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .browser-stop-btn {
+  display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 12px; background: #3a1010; border: 1px solid var(--red);
   border-radius: 4px; color: var(--red); font-size: 12px; cursor: pointer;
   white-space: nowrap;
@@ -912,11 +917,13 @@ html, body, #root {
 
 .git-topbar-actions { display: flex; gap: 6px; }
 .git-sync-btn {
+  display: inline-flex; align-items: center; gap: 4px;
   padding: 4px 10px; background: var(--hover-bg);
   border: 1px solid var(--border); border-radius: 4px;
   color: var(--text-dim); font-size: 11px; cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
+.git-sync-icon-only { padding: 4px 7px; }
 .git-sync-btn:hover:not(:disabled) { background: var(--active-bg); color: var(--text); }
 .git-sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -946,8 +953,9 @@ html, body, #root {
   display: flex; align-items: center; justify-content: space-between;
 }
 .git-refresh-btn {
+  display: inline-flex; align-items: center;
   background: none; border: none; cursor: pointer;
-  color: var(--text-dim); font-size: 13px; padding: 0 2px; line-height: 1;
+  color: var(--text-dim); padding: 0 2px;
 }
 .git-refresh-btn:hover { color: var(--text); }
 
@@ -1109,6 +1117,7 @@ html, body, #root {
   font-weight: 600;
   color: var(--text-bright);
   letter-spacing: 0.02em;
+  display: flex; align-items: center; gap: 7px;
 }
 
 .settings-close {
@@ -1130,6 +1139,7 @@ html, body, #root {
 }
 
 .settings-tab {
+  display: inline-flex; align-items: center; gap: 5px;
   padding: 9px 16px;
   background: none; border: none;
   border-bottom: 2px solid transparent;
@@ -1232,6 +1242,7 @@ html, body, #root {
 .settings-select option { background: var(--panel-bg); }
 
 .settings-add-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   padding: 8px 14px;
   background: none;
   border: 1px dashed var(--border);
@@ -1240,7 +1251,6 @@ html, body, #root {
   font-size: 12px;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
-  text-align: center;
 }
 .settings-add-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(35,139,230,0.05); }
 
@@ -1327,6 +1337,7 @@ html, body, #root {
 }
 
 .agent-generate-btn {
+  display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 9px;
   background: rgba(163, 113, 247, 0.1);
   border: 1px solid rgba(163, 113, 247, 0.35);
@@ -1541,6 +1552,7 @@ html, body, #root {
   font-size: 10.5px;
 }
 .settings-section-title {
+  display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-bright);
@@ -1565,7 +1577,8 @@ html, body, #root {
   min-width: 130px;
   padding-top: 6px;
 }
-.koda-routing-label > span:first-child {
+.koda-routing-label-name {
+  display: inline-flex; align-items: center; gap: 5px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-bright);
@@ -2043,6 +2056,9 @@ html, body, #root {
 .koda-history { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
 
 .koda-history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   font-family: inherit;
   background: rgba(255,255,255,0.06);
@@ -2606,7 +2622,7 @@ html, body, #root {
   font-size: 11px;
   border-radius: 3px;
   transition: background 0.1s, color 0.1s;
-  line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .kanban-card-btn:hover { background: var(--hover-bg); color: var(--text); }
 .kanban-card-btn.danger:hover { color: var(--red); }
@@ -2638,6 +2654,7 @@ html, body, #root {
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
   flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
 }
 .kanban-add-btn:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -2803,6 +2820,7 @@ select.kanban-input { cursor: pointer; }
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+  display: inline-flex; align-items: center; gap: 5px;
 }
 .kanban-header-btn:hover:not(:disabled) { background: var(--hover-bg); color: var(--text); }
 .kanban-header-btn:disabled             { opacity: 0.4; cursor: default; }
@@ -2847,6 +2865,7 @@ select.kanban-input { cursor: pointer; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex; align-items: center; gap: 4px;
 }
 
 .kanban-card-tags {
@@ -2943,6 +2962,7 @@ select.kanban-input { cursor: pointer; }
   font-family: inherit;
   cursor: pointer;
   transition: color 0.15s;
+  display: inline-flex; align-items: center; gap: 3px;
 }
 .kanban-filter-clear:hover { color: var(--red); }
 

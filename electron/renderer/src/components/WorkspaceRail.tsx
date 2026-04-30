@@ -1,4 +1,5 @@
 import React, { memo, useState } from 'react';
+import { Settings, X, Plus } from 'lucide-react';
 import { Workspace } from '../App';
 
 interface Props {
@@ -67,14 +68,14 @@ export default memo(function WorkspaceRail({
                 title={`Close ${ws.name}`}
                 onClick={e => { e.stopPropagation(); setConfirmCloseId(ws.id); }}
               >
-                ×
+                <X size={9} strokeWidth={2.5} />
               </span>
             )}
           </button>
         );
       })}
 
-      <button className="workspace-add-btn" onClick={onAdd} title="New workspace">+</button>
+      <button className="workspace-add-btn" onClick={onAdd} title="New workspace"><Plus size={18} strokeWidth={2} /></button>
 
       <div className="rail-spacer" />
 
@@ -87,7 +88,7 @@ export default memo(function WorkspaceRail({
       </button>
 
       <button className="rail-settings-btn" onClick={onOpenSettings} title="Settings">
-        ⚙
+        <Settings size={17} strokeWidth={1.75} />
       </button>
 
       {confirmCloseId && wsToClose && (
