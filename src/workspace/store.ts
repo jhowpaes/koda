@@ -92,6 +92,7 @@ export function resolveAgentConfig(
 export function agentEnv(ws: WorkspaceConfig, agent: 'code' | 'review' | 'git'): Record<string, string> {
   const cfg = resolveAgentConfig(ws, agent);
   const env: Record<string, string> = {
+    LLM_PROVIDER:   cfg.provider,
     LLM_API_KEY:    cfg.apiKey,
     LLM_MODEL:      cfg.model,
     LLM_MAX_TOKENS: String(cfg.maxTokens),

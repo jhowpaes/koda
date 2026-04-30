@@ -262,8 +262,9 @@ program
     if (workspace) {
       const { createProvider: cp } = await import('../llm/provider.js');
       provider = cp({
+        provider:  workspace.ceo.provider,
         apiKey:    workspace.ceo.apiKey,
-        baseURL:   workspace.ceo.baseURL ?? config.baseURL,
+        baseURL:   workspace.ceo.baseURL ?? (workspace.ceo.provider === 'anthropic' ? undefined : config.baseURL),
         model:     workspace.ceo.model,
         maxTokens: workspace.ceo.maxTokens ?? config.maxTokens,
       });
