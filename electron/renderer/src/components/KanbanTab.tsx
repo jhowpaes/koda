@@ -68,6 +68,8 @@ export default function KanbanTab({ projectRoot }: Props) {
   const [analyzing, setAnalyzing]       = useState(false);
   const [ceoProgress, setCeoProgress]   = useState<Record<string, string>>({});
   const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
+  const [pendingClarifications, setPendingClarifications] = useState<Record<string, { question: string; taskText: string }>>({});
+  const [clarificationInputs, setClarificationInputs]     = useState<Record<string, string>>({});
 
   // ── filter state ────────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery]     = useState('');
@@ -220,7 +222,32 @@ export default function KanbanTab({ projectRoot }: Props) {
       return updated;
     });
 
-    const planResult = await window.api.koda.plan(root, card.title);
+    const taskText = card.description?.trim()
+      ? `${card.title}\n\nDetalhes: ${card.description}`
+      : card.title;
+
+    const planResult = await window.api.koda.plan(root, taskText, undefined, loadSettings());
+
+    if (planResult.needsClarification) {
+      setPendingClarifications(prev => ({
+        ...prev,
+        [nextId]: { question: planResult.clarificationQuestion ?? 'Preciso de mais informações para continuar.', taskText },
+      }));
+      setCards(prev => {
+        const updated = prev.map(c =>
+          c.id === nextId ? { ...c, column: 'backlog' as KanbanColumn, error: undefined } : c
+        );
+        cardsRef.current = updated;
+        persistNow(root, updated);
+        return updated;
+      });
+      showToast(`CEO needs more info for "${card.title}"`);
+      queueRef.current = [];
+      setQueueRunning(false);
+      setQueueCardId(null);
+      return;
+    }
+
     if (planResult.error || !planResult.plan) {
       setCards(prev => {
         const updated = prev.map(c =>
@@ -239,7 +266,7 @@ export default function KanbanTab({ projectRoot }: Props) {
       return;
     }
 
-    window.api.koda.run(`kanban-${nextId}`, root, card.title, planResult.plan, undefined, loadSettings());
+    window.api.koda.run(`kanban-${nextId}`, root, taskText, planResult.plan, undefined, loadSettings());
   }
 
   function stopQueue() {
@@ -249,6 +276,65 @@ export default function KanbanTab({ projectRoot }: Props) {
     setQueueRunning(false);
     setQueueCardId(null);
     showToast('Queue stopped.');
+  }
+
+  async function submitClarification(cardId: string) {
+    if (!projectRoot) return;
+    const pending = pendingClarifications[cardId];
+    const answer  = clarificationInputs[cardId]?.trim();
+    if (!pending || !answer) return;
+
+    const enrichedTask = `${pending.taskText}\n\nResposta ao CEO: ${answer}`;
+
+    setPendingClarifications(prev => { const n = { ...prev }; delete n[cardId]; return n; });
+    setClarificationInputs(prev => { const n = { ...prev }; delete n[cardId]; return n; });
+
+    setQueueCardId(cardId);
+    setQueueRunning(true);
+    setCards(prev => {
+      const updated = prev.map(c =>
+        c.id === cardId ? { ...c, column: 'in-progress' as KanbanColumn, error: undefined } : c
+      );
+      cardsRef.current = updated;
+      persistNow(projectRoot, updated);
+      return updated;
+    });
+
+    const planResult = await window.api.koda.plan(projectRoot, enrichedTask, undefined, loadSettings());
+
+    if (planResult.needsClarification) {
+      setPendingClarifications(prev => ({
+        ...prev,
+        [cardId]: { question: planResult.clarificationQuestion ?? 'Preciso de mais informações.', taskText: enrichedTask },
+      }));
+      setCards(prev => {
+        const updated = prev.map(c =>
+          c.id === cardId ? { ...c, column: 'backlog' as KanbanColumn } : c
+        );
+        cardsRef.current = updated;
+        persistNow(projectRoot, updated);
+        return updated;
+      });
+      setQueueRunning(false);
+      setQueueCardId(null);
+      return;
+    }
+
+    if (planResult.error || !planResult.plan) {
+      setCards(prev => {
+        const updated = prev.map(c =>
+          c.id === cardId ? { ...c, column: 'backlog' as KanbanColumn, error: planResult.error ?? 'Planning failed' } : c
+        );
+        cardsRef.current = updated;
+        persistNow(projectRoot, updated);
+        return updated;
+      });
+      setQueueRunning(false);
+      setQueueCardId(null);
+      return;
+    }
+
+    window.api.koda.run(`kanban-${cardId}`, projectRoot, enrichedTask, planResult.plan, undefined, loadSettings());
   }
 
   // ── CEO propose ─────────────────────────────────────────────────────────────
@@ -525,6 +611,28 @@ export default function KanbanTab({ projectRoot }: Props) {
 
                       {card.error && (
                         <p className="kanban-card-error" title={card.error}>⚠ {card.error.slice(0, 80)}</p>
+                      )}
+
+                      {/* CEO clarification request */}
+                      {pendingClarifications[card.id] && (
+                        <div className="kanban-clarification">
+                          <p className="kanban-clarification-q">❓ {pendingClarifications[card.id].question}</p>
+                          <div className="kanban-clarification-row">
+                            <input
+                              className="kanban-input kanban-clarification-input"
+                              placeholder="Sua resposta..."
+                              value={clarificationInputs[card.id] ?? ''}
+                              autoFocus
+                              onChange={e => setClarificationInputs(prev => ({ ...prev, [card.id]: e.target.value }))}
+                              onKeyDown={e => { if (e.key === 'Enter') submitClarification(card.id); }}
+                            />
+                            <button
+                              className="kanban-clarification-send"
+                              onClick={() => submitClarification(card.id)}
+                              disabled={!clarificationInputs[card.id]?.trim()}
+                            >Enviar</button>
+                          </div>
+                        </div>
                       )}
 
                       {/* CEO summary (expandable) */}

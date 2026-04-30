@@ -1,6 +1,7 @@
 {
   "name": "koda",
   "version": "0.3.0",
+  "author": "Koda Contributors",
   "description": "AI coding assistant desktop app",
   "type": "module",
   "main": "out/main/index.cjs",
@@ -15,10 +16,10 @@
     "desktop": "ELECTRON_RUN_AS_NODE='' electron-vite dev",
     "desktop:build": "electron-vite build",
     "desktop:preview": "ELECTRON_RUN_AS_NODE='' electron-vite preview",
-    "dist": "electron-vite build && electron-builder",
-    "dist:mac": "electron-vite build && electron-builder --mac",
-    "dist:win": "electron-vite build && electron-builder --win",
-    "dist:linux": "electron-vite build && electron-builder --linux",
+    "dist": "electron-vite build && electron-builder --publish never",
+    "dist:mac": "electron-vite build && electron-builder --mac --publish never",
+    "dist:win": "electron-vite build && electron-builder --win --publish never",
+    "dist:linux": "electron-vite build && electron-builder --linux --publish never",
     "gen-icon": "bash scripts/gen-icon.sh"
   },
   "build": {
@@ -36,6 +37,7 @@
     "afterSign": "build/notarize.cjs",
     "mac": {
       "category": "public.app-category.developer-tools",
+      "identity": "Developer ID Application",
       "target": [
         {
           "target": "dmg",

@@ -81,8 +81,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // ── koda CEO ──────────────────────────────────────────────────────────────
   koda: {
-    plan: (projectRoot: string, task: string, kodaWorkspace?: unknown) =>
-      ipcRenderer.invoke('koda:plan', { projectRoot, task, kodaWorkspace }),
+    plan: (projectRoot: string, task: string, kodaWorkspace?: unknown, settings?: unknown) =>
+      ipcRenderer.invoke('koda:plan', { projectRoot, task, kodaWorkspace, settings }),
     run: (workspaceId: string, projectRoot: string, task: string, plan?: unknown, kodaWorkspace?: unknown, settings?: unknown) =>
       ipcRenderer.send('koda:run', { workspaceId, projectRoot, task, plan, kodaWorkspace, settings }),
     stop: (workspaceId: string) => ipcRenderer.invoke('koda:stop', workspaceId),
@@ -115,6 +115,8 @@ contextBridge.exposeInMainWorld('api', {
   claudeCode: {
     getStatus:        () => ipcRenderer.invoke('claudecode:auth:status'),
     getToken:         () => ipcRenderer.invoke('claudecode:token:get'),
+    login:            () => ipcRenderer.invoke('claudecode:login'),
+    logout:           () => ipcRenderer.invoke('claudecode:logout'),
     onAccountChanged: (cb: (status: any) => void) => ipcRenderer.on('claudecode:account:changed', (_, s) => cb(s)),
     offAccountChanged: () => ipcRenderer.removeAllListeners('claudecode:account:changed'),
   },

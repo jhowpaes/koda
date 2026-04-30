@@ -644,7 +644,7 @@ export default function App() {
       ...prev,
       [ws.id]: { ...EMPTY_KODA_STATE, planning: true, pendingTask: task },
     }));
-    const result = await window.api.koda.plan(ws.projectRoot, task);
+    const result = await window.api.koda.plan(ws.projectRoot, task, undefined, loadSettings());
     if (result.error || !result.plan) {
       setKodaStates(prev => ({
         ...prev,

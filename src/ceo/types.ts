@@ -9,6 +9,8 @@ export type TaskComplexity = 'simple' | 'moderate' | 'complex';
 
 export interface CeoPlan {
   thinking?: string;
+  needsClarification?: boolean;
+  clarificationQuestion?: string;
   complexity?: TaskComplexity;
   steps: CeoStep[];
   parallel: boolean;
