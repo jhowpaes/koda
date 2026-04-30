@@ -726,6 +726,23 @@ export default function App() {
     setActiveWorkspaceId(ws.id);
   }, [workspaces.length]);
 
+  const closeWorkspace = useCallback((id: string) => {
+    setWorkspaces(prev => {
+      if (prev.length <= 1) return prev;
+      const idx = prev.findIndex(w => w.id === id);
+      const ws = prev[idx];
+      if (ws?.projectRoot) window.api.unwatchProject(ws.projectRoot).catch(() => {});
+      const next = prev.filter(w => w.id !== id);
+      setActiveWorkspaceId(cur => {
+        if (cur !== id) return cur;
+        return (next[idx] ?? next[idx - 1] ?? next[0]).id;
+      });
+      return next;
+    });
+    setKodaStates(prev => { const n = { ...prev }; delete n[id]; return n; });
+    setKodaHistories(prev => { const n = { ...prev }; delete n[id]; return n; });
+  }, []);
+
   const openProject = useCallback(async () => {
     const folder = await window.api.openProject();
     if (!folder) return;
@@ -978,6 +995,7 @@ export default function App() {
         activeMode={activeWorkspace?.mode ?? 'chat'}
         runningWorkspaceIds={runningWorkspaceIds}
         onSelect={setActiveWorkspaceId}
+        onClose={closeWorkspace}
         onAdd={addWorkspace}
         onToggleKoda={toggleKodaMode}
         onOpenSettings={() => setShowSettings(true)}
